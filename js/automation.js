@@ -173,7 +173,8 @@ const automation = {
         };
 
         javascript.javascriptGenerator.forBlock['action_mdd'] = function(block, generator) {
-            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
+            var root = block.getRootBlock();
+            if (root.type !== 'event_macro' && root.type !== 'event_trigger') return '';
             var mod = block.getFieldValue('MODULE');
             var idx = generator.valueToCode(block, 'MOTOR_IDX', javascript.Order.ATOMIC) || 0;
             var target = generator.valueToCode(block, 'TARGET', javascript.Order.ATOMIC) || 0;
@@ -181,7 +182,8 @@ const automation = {
         };
 
         javascript.javascriptGenerator.forBlock['action_servo'] = function(block, generator) {
-            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
+            var root = block.getRootBlock();
+            if (root.type !== 'event_macro' && root.type !== 'event_trigger') return '';
             var mod = block.getFieldValue('MODULE');
             var idx = generator.valueToCode(block, 'CH_IDX', javascript.Order.ATOMIC) || 0;
             var angle = generator.valueToCode(block, 'ANGLE', javascript.Order.ATOMIC) || 90;
@@ -189,7 +191,8 @@ const automation = {
         };
 
         javascript.javascriptGenerator.forBlock['action_solenoid'] = function(block, generator) {
-            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
+            var root = block.getRootBlock();
+            if (root.type !== 'event_macro' && root.type !== 'event_trigger') return '';
             var mod = block.getFieldValue('MODULE');
             var idx = generator.valueToCode(block, 'VALVE_IDX', javascript.Order.ATOMIC) || 0;
             var state = block.getFieldValue('STATE');
@@ -197,7 +200,8 @@ const automation = {
         };
 
         javascript.javascriptGenerator.forBlock['action_delay'] = function(block, generator) {
-            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
+            var root = block.getRootBlock();
+            if (root.type !== 'event_macro' && root.type !== 'event_trigger') return '';
             var ms = generator.valueToCode(block, 'DELAY_MS', javascript.Order.ATOMIC) || 1000;
             return `await window.altairControlAPI.sleep(${ms});\n`;
         };
