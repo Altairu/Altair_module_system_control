@@ -39,23 +39,6 @@ const automation = {
     },
 
     getToolboxXml: function() {
-        // Generate toolbox dynamically based on added modules
-        let mddBlocks = '';
-        let servoBlocks = '';
-        let solenoidBlocks = '';
-        let mddConditionBlocks = '';
-
-        window.altairState.modules.forEach(m => {
-            if(m.type === 'mdd') {
-                mddBlocks += `<block type="action_mdd"><field name="MODULE">${m.id}</field></block>`;
-                mddConditionBlocks += `<block type="trigger_mdd_sw"><field name="MODULE">${m.id}</field></block>`;
-            } else if(m.type === 'servo') {
-                servoBlocks += `<block type="action_servo"><field name="MODULE">${m.id}</field></block>`;
-            } else if(m.type === 'solenoid') {
-                solenoidBlocks += `<block type="action_solenoid"><field name="MODULE">${m.id}</field></block>`;
-            }
-        });
-
         return `
         <xml xmlns="https://developers.google.com/blockly/xml" id="toolbox" style="display: none">
             <category name="イベント" colour="#f59e0b">
@@ -63,16 +46,13 @@ const automation = {
                 <block type="event_trigger"></block>
             </category>
             <category name="条件 (トリガー)" colour="#8b5cf6">
-                ${mddConditionBlocks}
+                <block type="trigger_mdd_sw"></block>
             </category>
-            <category name="アクション (MDD)" colour="#ef4444">
-                ${mddBlocks}
-            </category>
-            <category name="アクション (Servo)" colour="#10b981">
-                ${servoBlocks}
-            </category>
-            <category name="アクション (Solenoid)" colour="#3b82f6">
-                ${solenoidBlocks}
+            <category name="アクション" colour="#ef4444">
+                <block type="action_mdd"></block>
+                <block type="action_servo"></block>
+                <block type="action_solenoid"></block>
+                <block type="action_delay"></block>
             </category>
             <category name="論理・数値" colour="#334155">
                 <block type="controls_if"></block>
@@ -156,6 +136,17 @@ const automation = {
             }
         };
 
+        // Action: Delay
+        Blockly.Blocks['action_delay'] = {
+            init: function() {
+                this.appendValueInput("DELAY_MS").setCheck("Number").appendField("待機する (ミリ秒):");
+                this.setPreviousStatement(true, null);
+                this.setNextStatement(true, null);
+                this.setColour('#64748b');
+                this.setTooltip("指定したミリ秒だけ次のアクションを待ちます");
+            }
+        };
+
         // Condition: MDD SW
         Blockly.Blocks['trigger_mdd_sw'] = {
             init: function() {
@@ -173,15 +164,16 @@ const automation = {
         // Generate JavaScript for custom blocks
         javascript.javascriptGenerator.forBlock['event_macro'] = function(block, generator) {
             var branch = generator.statementToCode(block, 'DO');
-            return `function __macro() {\n${branch}}\n__macro();\n`;
+            return `async function __macro() {\n${branch}}\n__macro();\n`;
         };
 
         javascript.javascriptGenerator.forBlock['event_trigger'] = function(block, generator) {
             var branch = generator.statementToCode(block, 'DO');
-            return `function __trigger() {\n${branch}}\n__trigger();\n`;
+            return `async function __trigger() {\n${branch}}\n__trigger();\n`;
         };
 
         javascript.javascriptGenerator.forBlock['action_mdd'] = function(block, generator) {
+            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
             var mod = block.getFieldValue('MODULE');
             var idx = generator.valueToCode(block, 'MOTOR_IDX', javascript.Order.ATOMIC) || 0;
             var target = generator.valueToCode(block, 'TARGET', javascript.Order.ATOMIC) || 0;
@@ -189,6 +181,7 @@ const automation = {
         };
 
         javascript.javascriptGenerator.forBlock['action_servo'] = function(block, generator) {
+            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
             var mod = block.getFieldValue('MODULE');
             var idx = generator.valueToCode(block, 'CH_IDX', javascript.Order.ATOMIC) || 0;
             var angle = generator.valueToCode(block, 'ANGLE', javascript.Order.ATOMIC) || 90;
@@ -196,10 +189,17 @@ const automation = {
         };
 
         javascript.javascriptGenerator.forBlock['action_solenoid'] = function(block, generator) {
+            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
             var mod = block.getFieldValue('MODULE');
             var idx = generator.valueToCode(block, 'VALVE_IDX', javascript.Order.ATOMIC) || 0;
             var state = block.getFieldValue('STATE');
             return `window.altairControlAPI.setSolenoidValve('${mod}', ${idx}, ${state === '1'});\n`;
+        };
+
+        javascript.javascriptGenerator.forBlock['action_delay'] = function(block, generator) {
+            if (!block.getPreviousBlock() && !block.getSurroundParent()) return '';
+            var ms = generator.valueToCode(block, 'DELAY_MS', javascript.Order.ATOMIC) || 1000;
+            return `await window.altairControlAPI.sleep(${ms});\n`;
         };
 
         javascript.javascriptGenerator.forBlock['trigger_mdd_sw'] = function(block, generator) {
@@ -212,11 +212,8 @@ const automation = {
 
     runMacro: function() {
         try {
-            // マクロブロックだけ抽出して実行する簡易実装
             const code = javascript.javascriptGenerator.workspaceToCode(this.workspace);
-            // event_macro から生成されたコードを実行
-            // event_trigger のコードも混ざるが、手動実行時なので許容するか、関数を分ける
-            eval(code);
+            eval(`(async () => { ${code} })();`);
             ui.log("Automation", "Macro executed.", "success");
         } catch(e) {
             console.error(e);
@@ -225,20 +222,26 @@ const automation = {
     },
 
     evaluateTriggers: function() {
-        // Continuous evaluation loop called when CAN message is received
-        // To prevent hanging, we execute the generated code carefully
         if(!this.workspace) return;
+        // prevent trigger overlap when using delays
+        if(this.isRunningTrigger) return;
+        
         try {
+            this.isRunningTrigger = true;
             const code = javascript.javascriptGenerator.workspaceToCode(this.workspace);
-            eval(code);
+            eval(`(async () => { ${code} window.automation.isRunningTrigger = false; })();`);
         } catch(e) {
             console.error(e);
+            this.isRunningTrigger = false;
         }
     }
 };
 
 // API provided to EVAL environment
 window.altairControlAPI = {
+    sleep: function(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    },
     setMddTarget: function(id, idx, target) {
         if(id === 'none') return;
         ui.updateMddTarget(id, Math.floor(idx), target);
