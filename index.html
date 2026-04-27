@@ -88,9 +88,12 @@
             <!-- オートメーションビュー (Blockly) -->
             <section id="view-automation" class="view-section">
                 <header class="view-header glass-panel">
-                    <h2>自動化 (マクロ & トリガー)</h2>
+                    <h2>自動化 (マクロ & トリガー) <span id="macro-status" class="badge" style="background:#475569; margin-left:10px;">停止中</span></h2>
                     <div class="header-actions">
-                        <button id="btn-run-macro" class="btn btn-success"><i class="fa-solid fa-play"></i> マクロを実行</button>
+                        <button class="btn btn-secondary" onclick="automation.loadSample()"><i class="fa-solid fa-lightbulb"></i> サンプル</button>
+                        <button class="btn btn-secondary" onclick="automation.buildCheck()"><i class="fa-solid fa-code"></i> 文法チェック</button>
+                        <button id="btn-run-macro" class="btn btn-success"><i class="fa-solid fa-play"></i> 実行</button>
+                        <button id="btn-stop-macro" class="btn btn-danger"><i class="fa-solid fa-stop"></i> 停止</button>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle-trigger-engine">
                             <span class="slider"></span>

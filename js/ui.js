@@ -33,6 +33,10 @@ const ui = {
         document.getElementById('btn-run-macro').addEventListener('click', () => {
             if(window.automation) window.automation.runMacro();
         });
+
+        document.getElementById('btn-stop-macro').addEventListener('click', () => {
+            if(window.automation) window.automation.stopMacro();
+        });
     },
 
     switchView: function(viewId) {

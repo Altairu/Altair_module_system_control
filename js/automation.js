@@ -46,7 +46,7 @@ const automation = {
                 <block type="event_trigger"></block>
             </category>
             <category name="条件 (トリガー)" colour="#8b5cf6">
-                <block type="trigger_mdd_sw"></block>
+                <block type="trigger_mdd_sw_val"></block>
             </category>
             <category name="アクション" colour="#ef4444">
                 <block type="action_mdd"></block>
@@ -148,15 +148,15 @@ const automation = {
         };
 
         // Condition: MDD SW
-        Blockly.Blocks['trigger_mdd_sw'] = {
+        Blockly.Blocks['trigger_mdd_sw_val'] = {
             init: function() {
                 this.appendDummyInput()
                     .appendField("MDD:")
                     .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('mdd')), "MODULE")
                     .appendField("の SW")
                     .appendField(new Blockly.FieldDropdown([["1", "0"], ["2", "1"], ["3", "2"], ["4", "3"]]), "SW_IDX")
-                    .appendField("が ON である");
-                this.setOutput(true, "Boolean");
+                    .appendField("の値 (ON=1, OFF=0)");
+                this.setOutput(true, "Number");
                 this.setColour('#8b5cf6');
             }
         };
@@ -206,7 +206,7 @@ const automation = {
             return `await window.altairControlAPI.sleep(${ms});\n`;
         };
 
-        javascript.javascriptGenerator.forBlock['trigger_mdd_sw'] = function(block, generator) {
+        javascript.javascriptGenerator.forBlock['trigger_mdd_sw_val'] = function(block, generator) {
             var mod = block.getFieldValue('MODULE');
             var swIdx = block.getFieldValue('SW_IDX');
             var code = `window.altairControlAPI.getMddSw('${mod}', ${swIdx})`;
@@ -214,14 +214,114 @@ const automation = {
         };
     },
 
-    runMacro: function() {
+    buildCheck: function() {
+        if(!this.workspace) return;
         try {
             const code = javascript.javascriptGenerator.workspaceToCode(this.workspace);
-            eval(`(async () => { ${code} })();`);
-            ui.log("Automation", "Macro executed.", "success");
+            new Function(`return async function() { ${code} };`);
+            ui.log("Automation", "✅ ビルド成功 (文法エラーはありません)", "success");
+            ui.log("Automation", "生成されたコード:\n" + code, "info");
         } catch(e) {
-            console.error(e);
-            ui.log("Automation", "Error in Macro: " + e.message, "danger");
+            ui.log("Automation", "❌ ビルドエラー: " + e.message, "danger");
+        }
+    },
+
+    loadSample: function() {
+        if(!confirm("現在のブロックが上書きされます。よろしいですか？")) return;
+        const sampleXml = `
+        <xml xmlns="https://developers.google.com/blockly/xml">
+            <block type="event_macro" x="50" y="50">
+                <statement name="DO">
+                    <block type="action_mdd">
+                        <field name="MODULE">none</field>
+                        <value name="MOTOR_IDX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                        <value name="TARGET"><shadow type="math_number"><field name="NUM">100</field></shadow></value>
+                        <next>
+                            <block type="action_delay">
+                                <value name="DELAY_MS"><shadow type="math_number"><field name="NUM">1000</field></shadow></value>
+                                <next>
+                                    <block type="action_mdd">
+                                        <field name="MODULE">none</field>
+                                        <value name="MOTOR_IDX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                                        <value name="TARGET"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                                    </block>
+                                </next>
+                            </block>
+                        </next>
+                    </block>
+                </statement>
+            </block>
+            <block type="event_trigger" x="50" y="300">
+                <statement name="DO">
+                    <block type="controls_if">
+                        <value name="IF0">
+                            <block type="logic_compare">
+                                <field name="OP">EQ</field>
+                                <value name="A"><block type="trigger_mdd_sw_val"><field name="MODULE">none</field><field name="SW_IDX">0</field></block></value>
+                                <value name="B"><shadow type="math_number"><field name="NUM">1</field></shadow></value>
+                            </block>
+                        </value>
+                        <statement name="DO0">
+                            <block type="action_servo">
+                                <field name="MODULE">none</field>
+                                <value name="CH_IDX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                                <value name="ANGLE"><shadow type="math_number"><field name="NUM">180</field></shadow></value>
+                            </block>
+                        </statement>
+                    </block>
+                </statement>
+            </block>
+        </xml>
+        `;
+        this.workspace.clear();
+        Blockly.Xml.domToWorkspace(Blockly.Xml.textToDom(sampleXml), this.workspace);
+        ui.log("Automation", "サンプルを読み込みました。モジュール名('none'の部分)を選択し直してください。", "info");
+    },
+
+    stopMacro: function() {
+        window.altairControlAPI._stopRequested = true;
+        this.isMacroRunning = false;
+        const status = document.getElementById('macro-status');
+        if(status) {
+            status.innerText = '停止中';
+            status.style.background = '#475569';
+        }
+        ui.log("Automation", "🛑 マクロを強制停止しました", "warning");
+    },
+
+    runMacro: async function() {
+        if(this.isMacroRunning) return;
+        try {
+            this.isMacroRunning = true;
+            window.altairControlAPI._stopRequested = false;
+            const status = document.getElementById('macro-status');
+            if(status) {
+                status.innerText = '実行中...';
+                status.style.background = 'var(--success-color)';
+            }
+            const code = javascript.javascriptGenerator.workspaceToCode(this.workspace);
+            ui.log("Automation", "▶ マクロ実行開始", "info");
+            
+            await eval(`(async () => { ${code} })()`);
+            
+            if(!window.altairControlAPI._stopRequested) {
+                ui.log("Automation", "✅ マクロ完了", "success");
+            }
+        } catch(e) {
+            if(e.message === 'STOPPED') {
+                // stopMacro で出力済み
+            } else {
+                console.error(e);
+                ui.log("Automation", "❌ エラー: " + e.message, "danger");
+            }
+        } finally {
+            this.isMacroRunning = false;
+            window.altairControlAPI._stopRequested = false;
+            const status = document.getElementById('macro-status');
+            if(status) {
+                status.innerText = '停止中';
+                status.style.background = '#475569';
+            }
         }
     },
 
@@ -243,10 +343,17 @@ const automation = {
 
 // API provided to EVAL environment
 window.altairControlAPI = {
-    sleep: function(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    _stopRequested: false,
+    sleep: async function(ms) {
+        let elapsed = 0;
+        while(elapsed < ms) {
+            if(this._stopRequested) throw new Error('STOPPED');
+            await new Promise(r => setTimeout(r, 50));
+            elapsed += 50;
+        }
     },
     setMddTarget: function(id, idx, target) {
+        if(this._stopRequested) throw new Error('STOPPED');
         if(id === 'none') return;
         ui.updateMddTarget(id, Math.floor(idx), target);
     },
@@ -262,11 +369,12 @@ window.altairControlAPI = {
         if(cb) cb.checked = stateBool;
     },
     getMddSw: function(id, swIdx) {
-        if(id === 'none') return false;
+        if(this._stopRequested) throw new Error('STOPPED');
+        if(id === 'none') return 0;
         const m = window.altairState.modules.find(x => x.id === id);
         if(m && m.type === 'mdd' && m.state && m.state.sw) {
-            return m.state.sw[Math.floor(swIdx)] === 1;
+            return m.state.sw[Math.floor(swIdx)];
         }
-        return false;
+        return 0;
     }
 };
