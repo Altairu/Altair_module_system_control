@@ -37,6 +37,14 @@ const ui = {
         document.getElementById('btn-stop-macro').addEventListener('click', () => {
             if(window.automation) window.automation.stopMacro();
         });
+
+        document.getElementById('btn-load-sample').addEventListener('click', () => {
+            if(window.automation) window.automation.loadSample();
+        });
+
+        document.getElementById('btn-build-check').addEventListener('click', () => {
+            if(window.automation) window.automation.buildCheck();
+        });
     },
 
     switchView: function(viewId) {
