@@ -87,8 +87,9 @@ const automation = {
         const getModuleOptionsDropdown = function(type) {
             return function() {
                 const mods = window.altairState.modules.filter(m => m.type === type);
-                if(mods.length === 0) return [["モジュールなし", "none"]];
-                return mods.map(m => [m.name, m.id]);
+                let options = mods.map(m => [m.name, m.id]);
+                options.unshift(["未選択", "none"]);
+                return options;
             };
         };
 
@@ -234,16 +235,16 @@ const automation = {
                 <statement name="DO">
                     <block type="action_mdd">
                         <field name="MODULE">none</field>
-                        <value name="MOTOR_IDX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
-                        <value name="TARGET"><shadow type="math_number"><field name="NUM">100</field></shadow></value>
+                        <value name="MOTOR_IDX"><block type="math_number"><field name="NUM">0</field></block></value>
+                        <value name="TARGET"><block type="math_number"><field name="NUM">100</field></block></value>
                         <next>
                             <block type="action_delay">
-                                <value name="DELAY_MS"><shadow type="math_number"><field name="NUM">1000</field></shadow></value>
+                                <value name="DELAY_MS"><block type="math_number"><field name="NUM">1000</field></block></value>
                                 <next>
                                     <block type="action_mdd">
                                         <field name="MODULE">none</field>
-                                        <value name="MOTOR_IDX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
-                                        <value name="TARGET"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+                                        <value name="MOTOR_IDX"><block type="math_number"><field name="NUM">0</field></block></value>
+                                        <value name="TARGET"><block type="math_number"><field name="NUM">0</field></block></value>
                                     </block>
                                 </next>
                             </block>
@@ -258,14 +259,14 @@ const automation = {
                             <block type="logic_compare">
                                 <field name="OP">EQ</field>
                                 <value name="A"><block type="trigger_mdd_sw_val"><field name="MODULE">none</field><field name="SW_IDX">0</field></block></value>
-                                <value name="B"><shadow type="math_number"><field name="NUM">1</field></shadow></value>
+                                <value name="B"><block type="math_number"><field name="NUM">1</field></block></value>
                             </block>
                         </value>
                         <statement name="DO0">
                             <block type="action_servo">
                                 <field name="MODULE">none</field>
-                                <value name="CH_IDX"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
-                                <value name="ANGLE"><shadow type="math_number"><field name="NUM">180</field></shadow></value>
+                                <value name="CH_IDX"><block type="math_number"><field name="NUM">0</field></block></value>
+                                <value name="ANGLE"><block type="math_number"><field name="NUM">180</field></block></value>
                             </block>
                         </statement>
                     </block>
@@ -273,9 +274,14 @@ const automation = {
             </block>
         </xml>
         `;
-        this.workspace.clear();
-        Blockly.Xml.domToWorkspace(Blockly.Xml.textToDom(sampleXml), this.workspace);
-        ui.log("Automation", "サンプルを読み込みました。モジュール名('none'の部分)を選択し直してください。", "info");
+        try {
+            this.workspace.clear();
+            Blockly.Xml.domToWorkspace(Blockly.Xml.textToDom(sampleXml), this.workspace);
+            ui.log("Automation", "サンプルを読み込みました。「未選択」の部分を対象のモジュールに選び直してください。", "info");
+        } catch(e) {
+            console.error("Sample Load Error", e);
+            ui.log("Automation", "サンプルのロード中にエラーが発生しました: " + e.message, "danger");
+        }
     },
 
     stopMacro: function() {
