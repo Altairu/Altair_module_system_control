@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Altair Web Controller</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- Blockly -->
+    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+    <script src="https://unpkg.com/blockly/blocks_compressed.js"></script>
+    <script src="https://unpkg.com/blockly/javascript_compressed.js"></script>
+    <script src="https://unpkg.com/blockly/msg/ja.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app-container">
+        <!-- サイドバー -->
+        <aside class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <h2><i class="fa-solid fa-satellite-dish"></i> Altair</h2>
+                <p>Web Controller</p>
+            </div>
+
+            <!-- 通信コントロール -->
+            <div class="connection-panel">
+                <h3>Connection (slcan)</h3>
+                <div class="input-group">
+                    <label>Bitrate</label>
+                    <select id="can-bitrate">
+                        <option value="125000">125k</option>
+                        <option value="250000">250k</option>
+                        <option value="500000">500k</option>
+                        <option value="1000000" selected>1M</option>
+                    </select>
+                </div>
+                <button id="btn-connect" class="btn btn-primary"><i class="fa-solid fa-link"></i> Connect USB</button>
+                <button id="btn-disconnect" class="btn btn-danger" disabled><i class="fa-solid fa-unlink"></i> Disconnect</button>
+                <div id="connection-status" class="status-indicator offline">Offline</div>
+            </div>
+
+            <hr>
+
+            <!-- モジュール管理 -->
+            <div class="module-manager">
+                <h3>Modules</h3>
+                <button class="btn btn-secondary" onclick="ui.showAddModuleModal()">
+                    <i class="fa-solid fa-plus"></i> Add Module
+                </button>
+                <div id="module-list" class="module-list">
+                    <!-- 追加されたモジュールがここに並ぶ -->
+                </div>
+            </div>
+            
+            <hr>
+            
+            <!-- ナビゲーション -->
+            <div class="nav-menu">
+                <button class="nav-item active" data-target="view-dashboard"><i class="fa-solid fa-border-all"></i> Dashboard</button>
+                <button class="nav-item" data-target="view-automation"><i class="fa-solid fa-puzzle-piece"></i> Automation</button>
+                <button class="nav-item" data-target="view-logs"><i class="fa-solid fa-terminal"></i> Logs</button>
+            </div>
+        </aside>
+
+        <!-- メインコンテンツ -->
+        <main class="main-content">
+            <!-- ダッシュボードビュー (モジュール操作) -->
+            <section id="view-dashboard" class="view-section active">
+                <header class="view-header glass-panel">
+                    <h2>Dashboard</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-icon" onclick="storage.saveConfig()" title="Save Config"><i class="fa-solid fa-save"></i></button>
+                        <button class="btn btn-icon btn-danger" onclick="storage.clearConfig()" title="Reset Config"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                </header>
+                <div id="dashboard-container" class="dashboard-grid">
+                    <!-- モジュールのカードがここに生成される -->
+                    <div class="empty-state">
+                        <i class="fa-solid fa-cubes"></i>
+                        <p>No modules added yet. Add a module from the sidebar.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- オートメーションビュー (Blockly) -->
+            <section id="view-automation" class="view-section">
+                <header class="view-header glass-panel">
+                    <h2>Automation (Macro & Trigger)</h2>
+                    <div class="header-actions">
+                        <button id="btn-run-macro" class="btn btn-success"><i class="fa-solid fa-play"></i> Run Macro</button>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle-trigger-engine">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">Auto Trigger Engine</span>
+                    </div>
+                </header>
+                <div id="blockly-container" class="blockly-wrapper"></div>
+            </section>
+
+            <!-- ログビュー -->
+            <section id="view-logs" class="view-section">
+                <header class="view-header glass-panel">
+                    <h2>System Logs</h2>
+                    <button class="btn btn-secondary" onclick="document.getElementById('log-output').innerHTML=''"><i class="fa-solid fa-eraser"></i> Clear</button>
+                </header>
+                <div class="log-container glass-panel">
+                    <pre id="log-output"></pre>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- モジュール追加モーダル -->
+    <div id="add-module-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel">
+            <h3>Add New Module</h3>
+            <div class="form-group">
+                <label>Module Type</label>
+                <select id="modal-module-type">
+                    <option value="mdd">MDD (Motor Driver)</option>
+                    <option value="servo">Servo (6ch)</option>
+                    <option value="solenoid">Solenoid Valve (12ch)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Module Name (Alias)</label>
+                <input type="text" id="modal-module-name" placeholder="e.g. Front MDD">
+            </div>
+            <div class="form-group">
+                <label>Base CAN ID (Hex)</label>
+                <input type="text" id="modal-module-id" placeholder="e.g. 200, 400, 100">
+                <small class="help-text" id="modal-id-help">MDD uses Base to Base+0x30</small>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="ui.hideAddModuleModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="ui.confirmAddModule()">Add</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/storage.js"></script>
+    <script src="js/can_serial.js"></script>
+    <script src="js/automation.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
