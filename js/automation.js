@@ -165,12 +165,12 @@ const automation = {
         // Generate JavaScript for custom blocks
         javascript.javascriptGenerator.forBlock['event_macro'] = function(block, generator) {
             var branch = generator.statementToCode(block, 'DO');
-            return `async function __macro() {\n${branch}}\n__macro();\n`;
+            return `await (async function() {\n${branch}})();\n`;
         };
 
         javascript.javascriptGenerator.forBlock['event_trigger'] = function(block, generator) {
             var branch = generator.statementToCode(block, 'DO');
-            return `async function __trigger() {\n${branch}}\n__trigger();\n`;
+            return `await (async function() {\n${branch}})();\n`;
         };
 
         javascript.javascriptGenerator.forBlock['action_mdd'] = function(block, generator) {
@@ -370,9 +370,6 @@ window.altairControlAPI = {
     setSolenoidValve: function(id, idx, stateBool) {
         if(id === 'none') return;
         ui.updateSolenoidValve(id, Math.floor(idx), stateBool);
-        // Refresh UI
-        const cb = document.querySelector(`#card-${id} input[type="checkbox"][onchange*="updateSolenoidValve('${id}', ${Math.floor(idx)}"]`);
-        if(cb) cb.checked = stateBool;
     },
     getMddSw: function(id, swIdx) {
         if(this._stopRequested) throw new Error('STOPPED');
