@@ -88,14 +88,14 @@
             <!-- オートメーションビュー (Blockly) -->
             <section id="view-automation" class="view-section">
                 <header class="view-header glass-panel">
-                    <h2>Automation (Macro & Trigger)</h2>
+                    <h2>自動化 (マクロ & トリガー)</h2>
                     <div class="header-actions">
-                        <button id="btn-run-macro" class="btn btn-success"><i class="fa-solid fa-play"></i> Run Macro</button>
+                        <button id="btn-run-macro" class="btn btn-success"><i class="fa-solid fa-play"></i> マクロを実行</button>
                         <label class="toggle-switch">
                             <input type="checkbox" id="toggle-trigger-engine">
                             <span class="slider"></span>
                         </label>
-                        <span class="toggle-label">Auto Trigger Engine</span>
+                        <span class="toggle-label">オートトリガーエンジン</span>
                     </div>
                 </header>
                 <div id="blockly-container" class="blockly-wrapper"></div>
@@ -132,8 +132,13 @@
             </div>
             <div class="form-group">
                 <label>Base CAN ID (Hex)</label>
-                <input type="text" id="modal-module-id" placeholder="e.g. 200, 400, 100">
-                <small class="help-text" id="modal-id-help">MDD uses Base to Base+0x30</small>
+                <input type="text" id="modal-module-id" placeholder="e.g. 100, 200, 300">
+                <small class="help-text" id="modal-id-help" style="line-height: 1.4;">
+                    Sample IDs:<br>
+                    - <b>Servo</b>: 100<br>
+                    - <b>MDD</b>: 200<br>
+                    - <b>Solenoid Valve</b>: 300
+                </small>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="ui.hideAddModuleModal()">Cancel</button>

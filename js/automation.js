@@ -58,23 +58,23 @@ const automation = {
 
         return `
         <xml xmlns="https://developers.google.com/blockly/xml" id="toolbox" style="display: none">
-            <category name="Events" colour="#f59e0b">
+            <category name="イベント" colour="#f59e0b">
                 <block type="event_macro"></block>
                 <block type="event_trigger"></block>
             </category>
-            <category name="Conditions (Triggers)" colour="#8b5cf6">
+            <category name="条件 (トリガー)" colour="#8b5cf6">
                 ${mddConditionBlocks}
             </category>
-            <category name="Actions (MDD)" colour="#ef4444">
+            <category name="アクション (MDD)" colour="#ef4444">
                 ${mddBlocks}
             </category>
-            <category name="Actions (Servo)" colour="#10b981">
+            <category name="アクション (Servo)" colour="#10b981">
                 ${servoBlocks}
             </category>
-            <category name="Actions (Solenoid)" colour="#3b82f6">
+            <category name="アクション (Solenoid)" colour="#3b82f6">
                 ${solenoidBlocks}
             </category>
-            <category name="Logic" colour="#334155">
+            <category name="論理・数値" colour="#334155">
                 <block type="controls_if"></block>
                 <block type="logic_compare"></block>
                 <block type="math_number"></block>
@@ -87,41 +87,42 @@ const automation = {
         // Event: Macro (Click run button)
         Blockly.Blocks['event_macro'] = {
             init: function() {
-                this.appendDummyInput().appendField("When Macro Runs");
+                this.appendDummyInput().appendField("マクロ実行時");
                 this.appendStatementInput("DO").setCheck(null);
                 this.setColour('#f59e0b');
-                this.setTooltip("Runs actions when the 'Run Macro' button is clicked.");
+                this.setTooltip("「マクロを実行」ボタンを押した時に実行されます");
             }
         };
 
         // Event: Trigger Loop
         Blockly.Blocks['event_trigger'] = {
             init: function() {
-                this.appendDummyInput().appendField("Every tick (Trigger Engine)");
+                this.appendDummyInput().appendField("トリガーエンジンON時 (常時ループ)");
                 this.appendStatementInput("DO").setCheck(null);
                 this.setColour('#f59e0b');
-                this.setTooltip("Runs continuously when the Trigger Engine is ON.");
+                this.setTooltip("オートトリガーエンジンがONのとき、常に繰り返し実行されます");
             }
+        };
+
+        const getModuleOptionsDropdown = function(type) {
+            return function() {
+                const mods = window.altairState.modules.filter(m => m.type === type);
+                if(mods.length === 0) return [["モジュールなし", "none"]];
+                return mods.map(m => [m.name, m.id]);
+            };
         };
 
         // Action: MDD
         Blockly.Blocks['action_mdd'] = {
             init: function() {
                 this.appendDummyInput()
-                    .appendField("Set MDD")
-                    .appendField(new Blockly.FieldDropdown(this.getModuleOptions('mdd')), "MODULE");
-                this.appendValueInput("MOTOR_IDX").setCheck("Number").appendField("Motor (0-3)");
-                this.appendValueInput("TARGET").setCheck("Number").appendField("Target");
+                    .appendField("MDDを設定:")
+                    .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('mdd')), "MODULE");
+                this.appendValueInput("MOTOR_IDX").setCheck("Number").appendField("モータ番号(0-3)");
+                this.appendValueInput("TARGET").setCheck("Number").appendField("目標値");
                 this.setPreviousStatement(true, null);
                 this.setNextStatement(true, null);
                 this.setColour('#ef4444');
-            },
-            getModuleOptions: function(type) {
-                return function() {
-                    const mods = window.altairState.modules.filter(m => m.type === type);
-                    if(mods.length === 0) return [["None", "none"]];
-                    return mods.map(m => [m.name, m.id]);
-                }
             }
         };
 
@@ -129,10 +130,10 @@ const automation = {
         Blockly.Blocks['action_servo'] = {
             init: function() {
                 this.appendDummyInput()
-                    .appendField("Set Servo")
-                    .appendField(new Blockly.FieldDropdown(Blockly.Blocks['action_mdd'].getModuleOptions('servo')), "MODULE");
-                this.appendValueInput("CH_IDX").setCheck("Number").appendField("CH (0-5)");
-                this.appendValueInput("ANGLE").setCheck("Number").appendField("Angle (0-180)");
+                    .appendField("サーボを設定:")
+                    .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('servo')), "MODULE");
+                this.appendValueInput("CH_IDX").setCheck("Number").appendField("CH番号(0-5)");
+                this.appendValueInput("ANGLE").setCheck("Number").appendField("角度(0-180)");
                 this.setPreviousStatement(true, null);
                 this.setNextStatement(true, null);
                 this.setColour('#10b981');
@@ -143,11 +144,11 @@ const automation = {
         Blockly.Blocks['action_solenoid'] = {
             init: function() {
                 this.appendDummyInput()
-                    .appendField("Set Solenoid")
-                    .appendField(new Blockly.FieldDropdown(Blockly.Blocks['action_mdd'].getModuleOptions('solenoid')), "MODULE");
-                this.appendValueInput("VALVE_IDX").setCheck("Number").appendField("Valve (0-11)");
+                    .appendField("電磁弁を設定:")
+                    .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('solenoid')), "MODULE");
+                this.appendValueInput("VALVE_IDX").setCheck("Number").appendField("バルブ番号(0-11)");
                 this.appendDummyInput()
-                    .appendField("State")
+                    .appendField("状態")
                     .appendField(new Blockly.FieldDropdown([["ON", "1"], ["OFF", "0"]]), "STATE");
                 this.setPreviousStatement(true, null);
                 this.setNextStatement(true, null);
@@ -159,11 +160,11 @@ const automation = {
         Blockly.Blocks['trigger_mdd_sw'] = {
             init: function() {
                 this.appendDummyInput()
-                    .appendField("MDD")
-                    .appendField(new Blockly.FieldDropdown(Blockly.Blocks['action_mdd'].getModuleOptions('mdd')), "MODULE")
-                    .appendField("SW")
+                    .appendField("MDD:")
+                    .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('mdd')), "MODULE")
+                    .appendField("の SW")
                     .appendField(new Blockly.FieldDropdown([["1", "0"], ["2", "1"], ["3", "2"], ["4", "3"]]), "SW_IDX")
-                    .appendField("is ON");
+                    .appendField("が ON である");
                 this.setOutput(true, "Boolean");
                 this.setColour('#8b5cf6');
             }

@@ -503,3 +503,66 @@ input:checked + .slider:before {
     width: auto;
     margin-bottom: 0;
 }
+
+/* Solenoid Valve Large Toggle Button */
+.valve-toggle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.6);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 15px 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+.valve-toggle:hover {
+    border-color: rgba(255,255,255,0.3);
+    background: rgba(30, 41, 59, 0.8);
+}
+.valve-toggle.active {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: var(--success-color);
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+}
+.valve-toggle .v-label {
+    font-size: 1.1rem;
+    font-weight: 800;
+    margin-bottom: 8px;
+}
+.valve-toggle .v-status {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.valve-toggle.active .v-status {
+    color: var(--success-color);
+}
+
+/* MDD Parameters Grid */
+.mdd-param-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 5px;
+    margin-top: 10px;
+    background: rgba(0,0,0,0.2);
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+.mdd-param-item {
+    display: flex;
+    flex-direction: column;
+}
+.mdd-param-item label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+}
+.mdd-param-item input, .mdd-param-item select {
+    padding: 4px;
+    font-size: 0.8rem;
+    text-align: center;
+}

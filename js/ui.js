@@ -216,18 +216,57 @@ const ui = {
                 </div>
                 <div id="mdd-sw-${m.id}">SW: [${m.state.sw.join(',')}] Err: ${m.state.err}</div>
             </div>
-            <button class="btn btn-secondary" style="margin-bottom:15px; width:100%;" onclick="ui.reqMddParams('${m.id}')">Send Parameters</button>
-            <div style="display:flex; flex-direction:column; gap:8px;">
+            <button class="btn btn-secondary" style="margin-bottom:15px; width:100%;" onclick="ui.reqMddParams('${m.id}')">
+                <i class="fa-solid fa-upload"></i> Send Parameters (Set Param Mode)
+            </button>
+            <div style="display:flex; flex-direction:column; gap:15px;">
         `;
         for(let i=0; i<4; i++) {
+            let motor = m.motors[i];
             html += `
-                <div class="control-row">
-                    <label>M${i+1}</label>
-                    <div class="slider-container">
-                        <input type="range" min="-32767" max="32767" value="${m.motors[i].target}" 
-                            oninput="ui.updateMddTarget('${m.id}', ${i}, this.value)" 
-                            onchange="ui.updateMddTarget('${m.id}', ${i}, this.value)">
-                        <span class="val-display" id="mdd-val-${m.id}-${i}">${m.motors[i].target}</span>
+                <div style="border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
+                    <div class="control-row" style="margin-bottom: 10px;">
+                        <label style="font-weight: 800; color: var(--primary-color);">M${i+1} Tgt</label>
+                        <div class="slider-container">
+                            <input type="range" min="-32767" max="32767" value="${motor.target}" 
+                                oninput="ui.updateMddTarget('${m.id}', ${i}, this.value)" 
+                                onchange="ui.updateMddTarget('${m.id}', ${i}, this.value)">
+                            <span class="val-display" id="mdd-val-${m.id}-${i}">${motor.target}</span>
+                        </div>
+                    </div>
+                    <!-- Params -->
+                    <div class="mdd-param-grid">
+                        <div class="mdd-param-item">
+                            <label>Mode</label>
+                            <select onchange="ui.updateMddParam('${m.id}', ${i}, 'mode', this.value)">
+                                <option value="0" ${motor.mode == 0 ? 'selected' : ''}>Speed</option>
+                                <option value="1" ${motor.mode == 1 ? 'selected' : ''}>Angle</option>
+                                <option value="2" ${motor.mode == 2 ? 'selected' : ''}>Pos</option>
+                            </select>
+                        </div>
+                        <div class="mdd-param-item">
+                            <label>P Gain</label>
+                            <input type="number" step="0.1" value="${motor.p}" onchange="ui.updateMddParam('${m.id}', ${i}, 'p', this.value)">
+                        </div>
+                        <div class="mdd-param-item">
+                            <label>I Gain</label>
+                            <input type="number" step="0.1" value="${motor.i}" onchange="ui.updateMddParam('${m.id}', ${i}, 'i', this.value)">
+                        </div>
+                        <div class="mdd-param-item">
+                            <label>D Gain</label>
+                            <input type="number" step="0.1" value="${motor.d}" onchange="ui.updateMddParam('${m.id}', ${i}, 'd', this.value)">
+                        </div>
+                        <div class="mdd-param-item">
+                            <label>Wheel(mm)</label>
+                            <input type="number" step="1" value="${motor.wheel}" onchange="ui.updateMddParam('${m.id}', ${i}, 'wheel', this.value)">
+                        </div>
+                        <div class="mdd-param-item">
+                            <label>Dir (+/-)</label>
+                            <select onchange="ui.updateMddParam('${m.id}', ${i}, 'dir', this.value)">
+                                <option value="1" ${motor.dir >= 0 ? 'selected' : ''}>+ (Norm)</option>
+                                <option value="-1" ${motor.dir < 0 ? 'selected' : ''}>- (Rev)</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
             `;
@@ -256,14 +295,16 @@ const ui = {
     },
 
     getSolenoidHtml: function(m) {
-        let html = `<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;">`;
+        let html = `<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">`;
         for(let i=0; i<12; i++) {
-            const isChecked = (m.valves & (1<<i)) ? 'checked' : '';
+            const isActive = (m.valves & (1<<i)) ? true : false;
+            const activeClass = isActive ? 'active' : '';
+            const statusText = isActive ? 'ON' : 'OFF';
             html += `
-                <label style="display:flex; flex-direction:column; align-items:center; gap:5px; font-size:0.8rem;">
-                    <span>V${i+1}</span>
-                    <input type="checkbox" onchange="ui.updateSolenoidValve('${m.id}', ${i}, this.checked)" ${isChecked}>
-                </label>
+                <div class="valve-toggle ${activeClass}" id="valve-btn-${m.id}-${i}" onclick="ui.toggleSolenoidValve('${m.id}', ${i})">
+                    <span class="v-label">V${i+1}</span>
+                    <span class="v-status" id="valve-status-${m.id}-${i}">${statusText}</span>
+                </div>
             `;
         }
         html += `</div>`;
@@ -295,6 +336,14 @@ const ui = {
         }
     },
 
+    updateMddParam: function(id, motorIdx, key, val) {
+        const m = window.altairState.modules.find(x => x.id === id);
+        if(m) {
+            m.motors[motorIdx][key] = parseFloat(val);
+            storage.saveConfig();
+        }
+    },
+
     updateServoTarget: function(id, chIdx, val) {
         const m = window.altairState.modules.find(x => x.id === id);
         if(m) {
@@ -303,11 +352,33 @@ const ui = {
         }
     },
 
+    toggleSolenoidValve: function(id, valveIdx) {
+        const m = window.altairState.modules.find(x => x.id === id);
+        if(m) {
+            const currentState = (m.valves & (1 << valveIdx)) ? true : false;
+            this.updateSolenoidValve(id, valveIdx, !currentState);
+        }
+    },
+
     updateSolenoidValve: function(id, valveIdx, checked) {
         const m = window.altairState.modules.find(x => x.id === id);
         if(m) {
             if(checked) m.valves |= (1 << valveIdx);
             else m.valves &= ~(1 << valveIdx);
+            
+            // UI Update
+            const btn = document.getElementById(`valve-btn-${id}-${valveIdx}`);
+            const stat = document.getElementById(`valve-status-${id}-${valveIdx}`);
+            if(btn && stat) {
+                if(checked) {
+                    btn.classList.add('active');
+                    stat.innerText = 'ON';
+                } else {
+                    btn.classList.remove('active');
+                    stat.innerText = 'OFF';
+                }
+            }
+            storage.saveConfig();
         }
     },
 
