@@ -517,6 +517,12 @@ input:checked + .slider:before {
     cursor: pointer;
     transition: all 0.2s ease;
     user-select: none;
+    position: relative;
+    z-index: 2;
+    min-height: 80px;
+}
+.valve-toggle * {
+    pointer-events: none;
 }
 .valve-toggle:hover {
     border-color: rgba(255,255,255,0.3);
