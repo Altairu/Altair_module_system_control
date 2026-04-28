@@ -29,4 +29,9 @@ window.addEventListener('DOMContentLoaded', () => {
     if (window.gamepad) {
         gamepad.init();
     }
+    
+    // 6. Serial Controller 初期化
+    if (window.controllerSerial) {
+        controllerSerial.init();
+    }
 });

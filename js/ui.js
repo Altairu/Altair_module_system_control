@@ -23,6 +23,16 @@ const ui = {
             await canSerial.disconnect();
         });
 
+        // Serial Controller connection
+        document.getElementById('btn-connect-serial-ctrl').addEventListener('click', async () => {
+            const bitrate = document.getElementById('serial-ctrl-bitrate').value;
+            await controllerSerial.connect(bitrate);
+        });
+
+        document.getElementById('btn-disconnect-serial-ctrl').addEventListener('click', async () => {
+            await controllerSerial.disconnect();
+        });
+
         // Auto Trigger Engine Toggle
         document.getElementById('toggle-trigger-engine').addEventListener('change', (e) => {
             window.altairState.autoTriggerEngine = e.target.checked;
