@@ -44,7 +44,7 @@ const gamepad = {
             statusEl.innerText = `Connected: ${name}`;
         } else {
             statusEl.className = 'status-indicator offline';
-            statusEl.innerText = 'No Gamepad Detected';
+            statusEl.innerText = 'Press any button on controller';
             document.getElementById('gamepad-test-output').innerText = 'Waiting for input...';
         }
     },
