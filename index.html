@@ -61,6 +61,7 @@
             <div class="nav-menu">
                 <button class="nav-item active" data-target="view-dashboard"><i class="fa-solid fa-border-all"></i> Dashboard</button>
                 <button class="nav-item" data-target="view-automation"><i class="fa-solid fa-puzzle-piece"></i> Automation</button>
+                <button class="nav-item" data-target="view-controller"><i class="fa-solid fa-gamepad"></i> Controller</button>
                 <button class="nav-item" data-target="view-logs"><i class="fa-solid fa-terminal"></i> Logs</button>
             </div>
         </aside>
@@ -102,6 +103,39 @@
                     </div>
                 </header>
                 <div id="blockly-container" class="blockly-wrapper"></div>
+            </section>
+
+            <!-- コントローラービュー (Gamepad) -->
+            <section id="view-controller" class="view-section">
+                <header class="view-header glass-panel">
+                    <h2><i class="fa-solid fa-gamepad"></i> Game Controller</h2>
+                    <div class="header-actions">
+                        <div id="gamepad-status" class="status-indicator offline" style="margin-top:0; padding: 6px 12px;">No Gamepad Detected</div>
+                    </div>
+                </header>
+                <div class="controller-container">
+                    <div class="gamepad-test-area glass-panel">
+                        <h3>Input Test</h3>
+                        <p class="help-text">Press buttons or move sticks on your controller to see their index numbers. (PS Controller: Cross=0, Circle=1, Square=2, Triangle=3, L1=4, R1=5, L2=6, R2=7, etc.)</p>
+                        <div id="gamepad-test-output" class="test-output">Waiting for input...</div>
+                    </div>
+                    
+                    <div class="gamepad-mapping-area glass-panel" style="margin-top: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3>Button / Axis Mappings</h3>
+                            <button class="btn btn-primary" style="width: auto; margin-bottom: 0;" onclick="gamepad.showAddMappingModal()">
+                                <i class="fa-solid fa-plus"></i> Add Mapping
+                            </button>
+                        </div>
+                        <div id="mapping-list" class="mapping-list">
+                            <!-- Mappings will be populated here -->
+                            <div class="empty-state">
+                                <i class="fa-solid fa-link-slash"></i>
+                                <p>No mappings defined yet.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- ログビュー -->
@@ -150,10 +184,58 @@
         </div>
     </div>
 
+    <!-- マッピング追加モーダル -->
+    <div id="add-mapping-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel" style="width: 500px;">
+            <h3>Add Controller Mapping</h3>
+            <div style="display:flex; gap: 15px;">
+                <div class="form-group" style="flex:1;">
+                    <label>Input Type</label>
+                    <select id="modal-map-input-type" onchange="gamepad.updateModalOptions()">
+                        <option value="button">Button</option>
+                        <option value="axis">Axis (Stick)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>Input Index</label>
+                    <input type="number" id="modal-map-input-index" min="0" value="0">
+                </div>
+            </div>
+            
+            <div class="form-group" id="axis-dir-group" style="display: none;">
+                <label>Axis Direction</label>
+                <select id="modal-map-axis-dir">
+                    <option value="1">Positive (+)</option>
+                    <option value="-1">Negative (-)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Target Module</label>
+                <select id="modal-map-module" onchange="gamepad.updateModalOptions()"></select>
+            </div>
+
+            <div class="form-group">
+                <label>Action</label>
+                <select id="modal-map-action" onchange="gamepad.updateModalOptions()"></select>
+            </div>
+
+            <div class="form-group" id="modal-map-param-group">
+                <!-- 動的にパラメータ入力UIを生成 -->
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="gamepad.hideAddMappingModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="gamepad.confirmAddMapping()">Save Mapping</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="js/storage.js"></script>
     <script src="js/can_serial.js"></script>
     <script src="js/automation.js"></script>
+    <script src="js/gamepad.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/main.js"></script>
 </body>

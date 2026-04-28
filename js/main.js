@@ -6,7 +6,8 @@
 window.altairState = {
     modules: [],
     autoTriggerEngine: false,
-    _pendingBlocklyXml: null
+    _pendingBlocklyXml: null,
+    gamepadMappings: []
 };
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -23,4 +24,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // 4. Blockly初期化
     automation.init();
+
+    // 5. Gamepad初期化
+    if (window.gamepad) {
+        gamepad.init();
+    }
 });

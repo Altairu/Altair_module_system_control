@@ -18,7 +18,8 @@ const storage = {
 
         const data = {
             modules: window.altairState.modules,
-            blocklyXml: blocklyXml
+            blocklyXml: blocklyXml,
+            gamepadMappings: window.altairState.gamepadMappings
         };
 
         localStorage.setItem(this.SAVE_KEY, JSON.stringify(data));
@@ -38,6 +39,12 @@ const storage = {
                 if (data.blocklyXml) {
                     window.altairState._pendingBlocklyXml = data.blocklyXml;
                 }
+
+                if (data.gamepadMappings && Array.isArray(data.gamepadMappings)) {
+                    window.altairState.gamepadMappings = data.gamepadMappings;
+                } else {
+                    window.altairState.gamepadMappings = [];
+                }
                 
                 ui.log("System", `Loaded ${data.modules.length} modules from config.`, "info");
                 return true;
@@ -53,10 +60,12 @@ const storage = {
         if(confirm("Are you sure you want to clear the saved configuration? This cannot be undone.")){
             localStorage.removeItem(this.SAVE_KEY);
             window.altairState.modules = [];
+            window.altairState.gamepadMappings = [];
             if(window.automation && window.automation.workspace){
                 window.automation.workspace.clear();
             }
             ui.renderModules();
+            if(window.gamepad) gamepad.renderMappings();
             ui.log("System", "Configuration cleared.", "info");
         }
     }
