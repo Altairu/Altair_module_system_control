@@ -25,15 +25,14 @@ const gamepad = {
             if (this.gamepadIndex === e.gamepad.index) {
                 this.gamepadIndex = null;
                 this.updateStatus(false, "");
-                if (this.loopId) {
-                    cancelAnimationFrame(this.loopId);
-                    this.loopId = null;
-                }
             }
         });
 
         // Initialize UI
         this.renderMappings();
+
+        // Start polling loop unconditionally
+        this.loopId = requestAnimationFrame(this.poll.bind(this));
     },
 
     updateStatus: function(connected, name) {
@@ -50,9 +49,28 @@ const gamepad = {
     },
 
     poll: function() {
-        if (this.gamepadIndex === null) return;
+        // もし gamepadIndex が未設定の場合、接続済みのゲームパッドを探す
+        if (this.gamepadIndex === null) {
+            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+            for (let i = 0; i < pads.length; i++) {
+                if (pads[i]) {
+                    this.gamepadIndex = pads[i].index;
+                    this.updateStatus(true, pads[i].id);
+                    ui.log("Gamepad", `Found Connected: ${pads[i].id}`, "info");
+                    break;
+                }
+            }
+        }
+
+        if (this.gamepadIndex === null) {
+            this.loopId = requestAnimationFrame(this.poll.bind(this));
+            return;
+        }
+
         const pad = navigator.getGamepads()[this.gamepadIndex];
         if (!pad) {
+            this.gamepadIndex = null;
+            this.updateStatus(false, "");
             this.loopId = requestAnimationFrame(this.poll.bind(this));
             return;
         }
