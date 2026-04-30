@@ -13,7 +13,7 @@ const storage = {
         let blocklyXml = '';
         if (window.automation && window.automation.workspace) {
             const dom = Blockly.Xml.workspaceToDom(window.automation.workspace);
-            blocklyXml = Blockly.Xml.domToText(dom);
+            blocklyXml = Blockly.utils.xml.domToText(dom);
         }
 
         const data = {

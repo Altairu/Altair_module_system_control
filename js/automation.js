@@ -18,7 +18,7 @@ const automation = {
         // Load pending xml if any
         if(window.altairState._pendingBlocklyXml) {
             try {
-                const dom = Blockly.Xml.textToDom(window.altairState._pendingBlocklyXml);
+                const dom = Blockly.utils.xml.textToDom(window.altairState._pendingBlocklyXml);
                 Blockly.Xml.domToWorkspace(dom, this.workspace);
             } catch(e) { console.error("Failed to load blockly xml", e); }
             delete window.altairState._pendingBlocklyXml;
@@ -276,7 +276,7 @@ const automation = {
         `;
         try {
             this.workspace.clear();
-            Blockly.Xml.domToWorkspace(Blockly.Xml.textToDom(sampleXml), this.workspace);
+            Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(sampleXml), this.workspace);
             ui.log("Automation", "サンプルを読み込みました。「未選択」の部分を対象のモジュールに選び直してください。", "info");
         } catch(e) {
             console.error("Sample Load Error", e);

@@ -355,6 +355,9 @@ const ui = {
         if(m) {
             m.motors[motorIdx].target = parseInt(val);
             document.getElementById(`mdd-val-${id}-${motorIdx}`).innerText = val;
+            if(m.txEnabled && window.canSerial && window.canSerial.writer) {
+                if(m.state.appMode === 1) canSerial.sendMddTarget(m);
+            }
         }
     },
 
@@ -371,6 +374,9 @@ const ui = {
         if(m) {
             m.ch[chIdx] = parseInt(val);
             document.getElementById(`servo-val-${id}-${chIdx}`).innerText = val;
+            if(m.txEnabled && window.canSerial && window.canSerial.writer) {
+                canSerial.sendServoTarget(m);
+            }
         }
     },
 
@@ -401,6 +407,9 @@ const ui = {
                 }
             }
             storage.saveConfig();
+            if(m.txEnabled && window.canSerial && window.canSerial.writer) {
+                canSerial.sendSolenoidTarget(m);
+            }
         }
     },
 
