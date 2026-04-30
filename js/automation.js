@@ -381,3 +381,6 @@ window.altairControlAPI = {
         return 0;
     }
 };
+
+window.automation = automation;
+

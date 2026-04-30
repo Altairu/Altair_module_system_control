@@ -374,3 +374,5 @@ const gamepad = {
         });
     }
 };
+
+window.gamepad = gamepad;

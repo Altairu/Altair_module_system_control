@@ -154,3 +154,6 @@ const controllerSerial = {
         }
     }
 };
+
+window.controllerSerial = controllerSerial;
+
