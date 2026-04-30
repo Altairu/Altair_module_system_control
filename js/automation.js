@@ -54,10 +54,23 @@ const automation = {
                 <block type="action_solenoid"></block>
                 <block type="action_delay"></block>
             </category>
+            <category name="ループ" colour="#10b981">
+                <block type="controls_repeat_ext">
+                    <value name="TIMES">
+                        <shadow type="math_number">
+                            <field name="NUM">10</field>
+                        </shadow>
+                    </value>
+                </block>
+                <block type="controls_whileUntil"></block>
+            </category>
             <category name="論理・数値" colour="#334155">
                 <block type="controls_if"></block>
                 <block type="logic_compare"></block>
+                <block type="logic_operation"></block>
+                <block type="logic_boolean"></block>
                 <block type="math_number"></block>
+                <block type="math_arithmetic"></block>
             </category>
         </xml>
         `;
