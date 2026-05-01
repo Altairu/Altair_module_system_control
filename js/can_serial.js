@@ -182,6 +182,13 @@ const canSerial = {
                     m.state.appMode = data[5] & 0x01;
                     m.state.lastUpdate = Date.now();
                     
+                    // Automation Trigger evaluation first, or param completion
+                    if(m.state.paramSendRequested && m.state.appMode === 1) {
+                        m.state.paramSendRequested = false;
+                        m.state.paramSetupCompleted = true;
+                        ui.log("CAN", `MDD ${m.name} parameter setup completed.`, "success");
+                    }
+                    
                     ui.updateModuleUI(m);
                     
                     // Automation Trigger evaluation
@@ -213,14 +220,12 @@ const canSerial = {
             if(!m.txEnabled) return;
             
             if(m.type === 'mdd') {
-                if(m.state.appMode === 0) {
-                    // PARAMETER MODE
-                    if(m.state.paramSendRequested) {
-                        this.sendMddParams(m);
-                        this.sendMddMode(m);
-                    }
-                } else if(m.state.appMode === 1) {
-                    // CONTROL MODE
+                if(m.state.paramSendRequested) {
+                    // PARAMETER MODE (Sending continuously until setup is completed)
+                    this.sendMddParams(m);
+                    this.sendMddMode(m);
+                } else if(m.state.appMode === 1 && m.state.paramSetupCompleted) {
+                    // CONTROL MODE (Only send targets when setup is completed)
                     this.sendMddTarget(m);
                 }
             } else if(m.type === 'servo') {

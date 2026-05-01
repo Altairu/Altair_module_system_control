@@ -155,7 +155,7 @@ const ui = {
                 {target:0, mode:0, p:80, i:0, d:2, wheel:65, dir:1},
                 {target:0, mode:0, p:80, i:0, d:2, wheel:65, dir:1}
             ];
-            m.state = { appMode: 0, paramSendRequested: false, sw: [0,0,0,0], err: 0, lastUpdate: 0 };
+            m.state = { appMode: 0, paramSendRequested: false, paramSetupCompleted: false, sw: [0,0,0,0], err: 0, lastUpdate: 0 };
         } else if(type === 'servo') {
             m.ch = [90,90,90,90,90,90];
         } else if(type === 'solenoid') {
@@ -346,6 +346,7 @@ const ui = {
         const m = window.altairState.modules.find(x => x.id === id);
         if(m) {
             m.state.paramSendRequested = true;
+            m.state.paramSetupCompleted = false;
             this.log("System", `Requested Param Send for MDD ${m.name}`);
         }
     },
@@ -356,7 +357,7 @@ const ui = {
             m.motors[motorIdx].target = parseInt(val);
             document.getElementById(`mdd-val-${id}-${motorIdx}`).innerText = val;
             if(m.txEnabled && window.canSerial && window.canSerial.writer) {
-                if(m.state.appMode === 1) canSerial.sendMddTarget(m);
+                if(m.state.appMode === 1 && m.state.paramSetupCompleted) canSerial.sendMddTarget(m);
             }
         }
     },

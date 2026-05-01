@@ -33,7 +33,13 @@ const storage = {
         try {
             const data = JSON.parse(dataStr);
             if (data.modules && Array.isArray(data.modules)) {
-                window.altairState.modules = data.modules;
+                window.altairState.modules = data.modules.map(m => {
+                    if (m.type === 'mdd' && m.state) {
+                        m.state.paramSendRequested = false;
+                        m.state.paramSetupCompleted = false;
+                    }
+                    return m;
+                });
                 
                 // restore blockly later after injection
                 if (data.blocklyXml) {
