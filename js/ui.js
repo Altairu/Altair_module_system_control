@@ -127,6 +127,7 @@ const ui = {
 
         const newMod = this.createModuleData(type, name, baseId);
         window.altairState.modules.push(newMod);
+        window.altairState.modulesById[newMod.id] = newMod;
         
         this.renderModules();
         this.hideAddModuleModal();
@@ -167,6 +168,7 @@ const ui = {
     deleteModule: function(id) {
         if(!confirm("Delete this module?")) return;
         window.altairState.modules = window.altairState.modules.filter(m => m.id !== id);
+        delete window.altairState.modulesById[id];
         this.renderModules();
         storage.saveConfig();
         if(window.automation) window.automation.updateToolbox();
@@ -335,7 +337,7 @@ const ui = {
 
     // --- Control Handlers ---
     toggleTx: function(id, enabled) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             m.txEnabled = enabled;
             this.log("System", `TX ${enabled ? 'Enabled' : 'Disabled'} for ${m.name}`);
@@ -343,7 +345,7 @@ const ui = {
     },
 
     reqMddParams: function(id) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             m.state.paramSendRequested = true;
             m.state.paramSetupCompleted = false;
@@ -352,7 +354,7 @@ const ui = {
     },
 
     updateMddTarget: function(id, motorIdx, val) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             m.motors[motorIdx].target = parseInt(val);
             document.getElementById(`mdd-val-${id}-${motorIdx}`).innerText = val;
@@ -363,7 +365,7 @@ const ui = {
     },
 
     updateMddParam: function(id, motorIdx, key, val) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             m.motors[motorIdx][key] = parseFloat(val);
             storage.saveConfig();
@@ -371,7 +373,7 @@ const ui = {
     },
 
     updateServoTarget: function(id, chIdx, val) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             m.ch[chIdx] = parseInt(val);
             document.getElementById(`servo-val-${id}-${chIdx}`).innerText = val;
@@ -382,7 +384,7 @@ const ui = {
     },
 
     toggleSolenoidValve: function(id, valveIdx) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             const currentState = (m.valves & (1 << valveIdx)) ? true : false;
             this.updateSolenoidValve(id, valveIdx, !currentState);
@@ -390,7 +392,7 @@ const ui = {
     },
 
     updateSolenoidValve: function(id, valveIdx, checked) {
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m) {
             if(checked) m.valves |= (1 << valveIdx);
             else m.valves &= ~(1 << valveIdx);
