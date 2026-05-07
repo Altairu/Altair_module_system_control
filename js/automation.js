@@ -387,7 +387,7 @@ window.altairControlAPI = {
     getMddSw: function(id, swIdx) {
         if(this._stopRequested) throw new Error('STOPPED');
         if(id === 'none') return 0;
-        const m = window.altairState.modules.find(x => x.id === id);
+        const m = window.altairState.modulesById[id];
         if(m && m.type === 'mdd' && m.state && m.state.sw) {
             return m.state.sw[Math.floor(swIdx)];
         }
