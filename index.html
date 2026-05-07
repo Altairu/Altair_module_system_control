@@ -63,6 +63,7 @@
                 <button class="nav-item" data-target="view-automation"><i class="fa-solid fa-puzzle-piece"></i> Automation</button>
                 <button class="nav-item" data-target="view-controller"><i class="fa-solid fa-gamepad"></i> Controller</button>
                 <button class="nav-item" data-target="view-logs"><i class="fa-solid fa-terminal"></i> Logs</button>
+                <button class="nav-item" data-target="view-help"><i class="fa-solid fa-circle-question"></i> Help</button>
             </div>
         </aside>
 
@@ -155,6 +156,46 @@
                 </header>
                 <div class="log-container glass-panel">
                     <pre id="log-output"></pre>
+                </div>
+            </section>
+
+            <!-- ヘルプビュー -->
+            <section id="view-help" class="view-section">
+                <header class="view-header glass-panel">
+                    <h2><i class="fa-solid fa-circle-question"></i> Usage Guide (使い方)</h2>
+                </header>
+                <div class="help-container glass-panel" style="padding: 20px; color: var(--text-color); overflow-y: auto; height: calc(100vh - 120px);">
+                    <h3>1. 接続 (Connection)</h3>
+                    <p>このアプリケーションは、Web Serial APIを利用してUSB接続されたCANアダプタ(slcanプロトコル)と通信します。</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>左メニューの <strong>Connection (slcan)</strong> から、対象デバイスの通信速度(Bitrate)を選択します。</li>
+                        <li><strong>Connect USB</strong> をクリックし、ブラウザのポップアップから接続するCOMポートを選択してください。</li>
+                    </ul>
+
+                    <h3>2. モジュールの設定 (Modules)</h3>
+                    <p>操作したいハードウェア(MDD, Servo, Solenoid)をダッシュボードに追加します。</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li><strong>Add Module</strong> ボタンを押し、モジュールの種類、任意の名前、対象の <strong>Base CAN ID (Hex)</strong> を設定して追加します。</li>
+                        <li>各モジュールのカード下部にある <strong>Enable TX</strong> のチェックを入れると、実際にCANフレームが送信されるようになります。</li>
+                        <li><strong>MDDの場合:</strong> 最初にPIDゲインや動作モードを設定し、「Send Parameters (Set Param Mode)」を押してパラメータを確定させてから目標値を操作してください。</li>
+                    </ul>
+
+                    <h3>3. ゲームコントローラーでの操作 (Game Controller)</h3>
+                    <p>PCに接続されたゲームパッドを用いてモジュールを操作できます。</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li><strong>Controller</strong> 画面を開き、ゲームパッドの適当なボタンを押して「Connected」になることを確認します。</li>
+                        <li><strong>Add Mapping</strong> から、ボタンまたはスティック軸に対して、どのアクション(トグルや加算など)を割り当てるか設定してください。</li>
+                    </ul>
+
+                    <h3>4. 自動化とマクロ (Automation)</h3>
+                    <p>Blocklyによるビジュアルプログラミングで自動化が行えます。</p>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>ブロックを組み合わせて、「マクロ実行時」に一連の動作（例: 目標値設定→1秒待機→目標値ゼロ）を実行させることができます。</li>
+                        <li><strong>オートトリガーエンジン</strong>をONにすると、「トリガーエンジンON時」のブロック内の条件式（例: MDDのスイッチ入力が1になったら）が常に評価され、自動でアクションが発火します。</li>
+                    </ul>
+
+                    <h3>5. 設定の保存について</h3>
+                    <p>追加したモジュールやコントローラーのマッピング、Blocklyのプログラムは、ブラウザのLocalStorageに自動的に保存され、次回アクセス時に復元されます。手動で保存する場合はダッシュボード右上の保存アイコンをクリックしてください。</p>
                 </div>
             </section>
         </main>
