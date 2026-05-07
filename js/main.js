@@ -5,6 +5,7 @@
 
 window.altairState = {
     modules: [],
+    modulesById: {},
     autoTriggerEngine: false,
     _pendingBlocklyXml: null,
     gamepadMappings: []

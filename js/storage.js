@@ -40,6 +40,12 @@ const storage = {
                     }
                     return m;
                 });
+
+                // Populate modulesById
+                window.altairState.modulesById = {};
+                window.altairState.modules.forEach(m => {
+                    window.altairState.modulesById[m.id] = m;
+                });
                 
                 // restore blockly later after injection
                 if (data.blocklyXml) {
@@ -66,6 +72,7 @@ const storage = {
         if(confirm("Are you sure you want to clear the saved configuration? This cannot be undone.")){
             localStorage.removeItem(this.SAVE_KEY);
             window.altairState.modules = [];
+            window.altairState.modulesById = {};
             window.altairState.gamepadMappings = [];
             if(window.automation && window.automation.workspace){
                 window.automation.workspace.clear();

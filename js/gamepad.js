@@ -141,7 +141,7 @@ const gamepad = {
     },
 
     executeAction: function(map, isPressed, rawValue) {
-        const mod = window.altairState.modules.find(m => m.id === map.moduleId);
+        const mod = window.altairState.modulesById[map.moduleId];
         if (!mod) return;
 
         // 電磁弁 トグル (押した瞬間のみ)
@@ -224,7 +224,7 @@ const gamepad = {
         
         document.getElementById('axis-dir-group').style.display = (inputType === 'axis') ? 'block' : 'none';
 
-        const mod = window.altairState.modules.find(m => m.id === modId);
+        const mod = window.altairState.modulesById[modId];
         if (!mod) return;
 
         const actionSelect = document.getElementById('modal-map-action');
@@ -340,7 +340,7 @@ const gamepad = {
         }
 
         window.altairState.gamepadMappings.forEach(map => {
-            const mod = window.altairState.modules.find(m => m.id === map.moduleId);
+            const mod = window.altairState.modulesById[map.moduleId];
             const modName = mod ? mod.name : 'Deleted Module';
 
             let inputStr = `${map.inputType === 'button' ? 'BTN' : 'AXIS'} ${map.inputIndex}`;
