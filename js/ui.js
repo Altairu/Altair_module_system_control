@@ -214,10 +214,10 @@ const ui = {
 
         if(type === 'mdd') {
             m.motors = [
-                {target:0, mode:0, p:80, i:0, d:2, wheel:65, dir:1},
-                {target:0, mode:0, p:80, i:0, d:2, wheel:65, dir:1},
-                {target:0, mode:0, p:80, i:0, d:2, wheel:65, dir:1},
-                {target:0, mode:0, p:80, i:0, d:2, wheel:65, dir:1}
+                {target:0, mode:0, p:10, i:0, d:0, wheel:65, dir:1},
+                {target:0, mode:0, p:10, i:0, d:0, wheel:65, dir:1},
+                {target:0, mode:0, p:10, i:0, d:0, wheel:65, dir:1},
+                {target:0, mode:0, p:10, i:0, d:0, wheel:65, dir:1}
             ];
             m.state = { appMode: 0, paramSendRequested: false, paramSetupCompleted: false, sw: [0,0,0,0], err: 0, lastUpdate: 0 };
         } else if(type === 'servo') {
