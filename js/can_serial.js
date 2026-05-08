@@ -196,6 +196,36 @@ const canSerial = {
                         window.automation.evaluateTriggers();
                     }
                 }
+                else if (id === m.baseId + 0x40) {
+                    // Encoder DEG (0x240)
+                    if (data.length >= 8) {
+                        if (!m.state.enc_deg) m.state.enc_deg = [0, 0, 0, 0];
+                        for (let i = 0; i < 4; i++) {
+                            let raw = data[i * 2] | (data[i * 2 + 1] << 8);
+                            if (raw >= 0x8000) raw -= 0x10000;
+                            m.state.enc_deg[i] = raw / 10.0;
+                        }
+                        ui.updateModuleUI(m);
+                        if (window.automation && window.altairState.autoTriggerEngine) {
+                            window.automation.evaluateTriggers();
+                        }
+                    }
+                }
+                else if (id === m.baseId + 0x50) {
+                    // Encoder RPS (0x250)
+                    if (data.length >= 8) {
+                        if (!m.state.enc_rps) m.state.enc_rps = [0, 0, 0, 0];
+                        for (let i = 0; i < 4; i++) {
+                            let raw = data[i * 2] | (data[i * 2 + 1] << 8);
+                            if (raw >= 0x8000) raw -= 0x10000;
+                            m.state.enc_rps[i] = raw / 100.0;
+                        }
+                        ui.updateModuleUI(m);
+                        if (window.automation && window.altairState.autoTriggerEngine) {
+                            window.automation.evaluateTriggers();
+                        }
+                    }
+                }
             }
         });
     },

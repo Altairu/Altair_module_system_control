@@ -47,6 +47,8 @@ const automation = {
             </category>
             <category name="条件 (トリガー)" colour="#8b5cf6">
                 <block type="trigger_mdd_sw_val"></block>
+                <block type="trigger_mdd_enc_deg_val"></block>
+                <block type="trigger_mdd_enc_rps_val"></block>
             </category>
             <category name="アクション" colour="#ef4444">
                 <block type="action_mdd"></block>
@@ -175,6 +177,34 @@ const automation = {
             }
         };
 
+        // Condition: MDD Encoder DEG
+        Blockly.Blocks['trigger_mdd_enc_deg_val'] = {
+            init: function() {
+                this.appendDummyInput()
+                    .appendField("MDD:")
+                    .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('mdd')), "MODULE")
+                    .appendField("の モータ")
+                    .appendField(new Blockly.FieldDropdown([["1", "0"], ["2", "1"], ["3", "2"], ["4", "3"]]), "MOTOR_IDX")
+                    .appendField("の角度(度)");
+                this.setOutput(true, "Number");
+                this.setColour('#8b5cf6');
+            }
+        };
+
+        // Condition: MDD Encoder RPS
+        Blockly.Blocks['trigger_mdd_enc_rps_val'] = {
+            init: function() {
+                this.appendDummyInput()
+                    .appendField("MDD:")
+                    .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('mdd')), "MODULE")
+                    .appendField("の モータ")
+                    .appendField(new Blockly.FieldDropdown([["1", "0"], ["2", "1"], ["3", "2"], ["4", "3"]]), "MOTOR_IDX")
+                    .appendField("の回転速度(rps)");
+                this.setOutput(true, "Number");
+                this.setColour('#8b5cf6');
+            }
+        };
+
         // Generate JavaScript for custom blocks
         javascript.javascriptGenerator.forBlock['event_macro'] = function(block, generator) {
             var branch = generator.statementToCode(block, 'DO');
@@ -224,6 +254,20 @@ const automation = {
             var mod = block.getFieldValue('MODULE');
             var swIdx = block.getFieldValue('SW_IDX');
             var code = `window.altairControlAPI.getMddSw('${mod}', ${swIdx})`;
+            return [code, javascript.Order.NONE];
+        };
+
+        javascript.javascriptGenerator.forBlock['trigger_mdd_enc_deg_val'] = function(block, generator) {
+            var mod = block.getFieldValue('MODULE');
+            var motorIdx = block.getFieldValue('MOTOR_IDX');
+            var code = `window.altairControlAPI.getMddEncDeg('${mod}', ${motorIdx})`;
+            return [code, javascript.Order.NONE];
+        };
+
+        javascript.javascriptGenerator.forBlock['trigger_mdd_enc_rps_val'] = function(block, generator) {
+            var mod = block.getFieldValue('MODULE');
+            var motorIdx = block.getFieldValue('MOTOR_IDX');
+            var code = `window.altairControlAPI.getMddEncRps('${mod}', ${motorIdx})`;
             return [code, javascript.Order.NONE];
         };
     },
@@ -390,6 +434,24 @@ window.altairControlAPI = {
         const m = window.altairState.modulesById[id];
         if(m && m.type === 'mdd' && m.state && m.state.sw) {
             return m.state.sw[Math.floor(swIdx)];
+        }
+        return 0;
+    },
+    getMddEncDeg: function(id, motorIdx) {
+        if(this._stopRequested) throw new Error('STOPPED');
+        if(id === 'none') return 0;
+        const m = window.altairState.modulesById[id];
+        if(m && m.type === 'mdd' && m.state && m.state.enc_deg) {
+            return m.state.enc_deg[Math.floor(motorIdx)];
+        }
+        return 0;
+    },
+    getMddEncRps: function(id, motorIdx) {
+        if(this._stopRequested) throw new Error('STOPPED');
+        if(id === 'none') return 0;
+        const m = window.altairState.modulesById[id];
+        if(m && m.type === 'mdd' && m.state && m.state.enc_rps) {
+            return m.state.enc_rps[Math.floor(motorIdx)];
         }
         return 0;
     }

@@ -305,6 +305,9 @@ const ui = {
                 </div>
                 <div id="mdd-sw-${m.id}">SW: [${m.state.sw.join(',')}] Err: ${m.state.err}</div>
             </div>
+            <div id="mdd-enc-${m.id}" style="margin-bottom:10px; font-size:0.85rem; color:var(--text-secondary);">
+                ENC: [Waiting for data...]
+            </div>
             <button class="btn btn-secondary" style="margin-bottom:15px; width:100%;" onclick="ui.reqMddParams('${m.id}')">
                 <i class="fa-solid fa-upload"></i> Send Parameters (Set Param Mode)
             </button>
@@ -511,6 +514,7 @@ const ui = {
         if(m.type === 'mdd') {
             const st = document.getElementById(`mdd-status-${m.id}`);
             const sw = document.getElementById(`mdd-sw-${m.id}`);
+            const enc = document.getElementById(`mdd-enc-${m.id}`);
             if(st && sw) {
                 if(m.state.appMode === 1) {
                     st.innerText = 'CONTROL MODE';
@@ -520,6 +524,18 @@ const ui = {
                     st.style.color = 'var(--text-secondary)';
                 }
                 sw.innerText = `SW: [${m.state.sw.join(',')}] Err: ${m.state.err}`;
+            }
+            if(enc) {
+                const deg = m.state.enc_deg || [0,0,0,0];
+                const rps = m.state.enc_rps || [0,0,0,0];
+                let encStr = "";
+                for(let i=0; i<4; i++) {
+                    let d = (deg[i] > 0 ? "+" : "") + deg[i].toFixed(1);
+                    let r = (rps[i] > 0 ? "+" : "") + rps[i].toFixed(2);
+                    encStr += `M${i+1}: ${d}° ${r}rps`;
+                    if(i < 3) encStr += " | ";
+                }
+                enc.innerText = `ENC: ${encStr}`;
             }
         }
     }
