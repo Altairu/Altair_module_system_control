@@ -5,7 +5,7 @@
 
 const ui = {
     init: function() {
-        // Navigation setup
+        // ナビゲーション設定
         document.querySelectorAll('.nav-item').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const targetId = e.currentTarget.getAttribute('data-target');
@@ -13,7 +13,65 @@ const ui = {
             });
         });
 
-        // Connection button
+        // ハンバーガーメニューボタン（モバイル用サイドバー開閉）
+        const hamburger = document.getElementById('btn-hamburger');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+        const sidebar = document.querySelector('.sidebar');
+
+        const openSidebar = () => {
+            sidebar.classList.add('sidebar-open');
+            if (sidebarOverlay) sidebarOverlay.classList.add('active');
+        };
+        const closeSidebar = () => {
+            sidebar.classList.remove('sidebar-open');
+            if (sidebarOverlay) sidebarOverlay.classList.remove('active');
+        };
+
+        if (hamburger) {
+            hamburger.addEventListener('click', () => {
+                if (sidebar.classList.contains('sidebar-open')) {
+                    closeSidebar();
+                } else {
+                    openSidebar();
+                }
+            });
+        }
+
+        // サイドバーオーバーレイをクリックして閉じる
+        if (sidebarOverlay) {
+            sidebarOverlay.addEventListener('click', () => closeSidebar());
+        }
+
+        // テーマ切り替えボタン
+        const themeBtn = document.getElementById('btn-theme-toggle');
+        if (themeBtn) {
+            themeBtn.addEventListener('click', () => {
+                storage.toggleTheme();
+            });
+        }
+
+        // エクスポートボタン
+        const exportBtn = document.getElementById('btn-export-config');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => storage.exportConfig());
+        }
+
+        // インポートボタン
+        const importBtn = document.getElementById('btn-import-config');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => storage.importConfig());
+        }
+
+        // ファイル選択後の処理
+        const importInput = document.getElementById('import-config-input');
+        if (importInput) {
+            importInput.addEventListener('change', (e) => {
+                storage._handleImportFile(e.target.files[0]);
+                e.target.value = ''; // 同じファイルを再選択できるようリセット
+            });
+        }
+
+        // CAN接続ボタン
         document.getElementById('btn-connect').addEventListener('click', async () => {
             const bitrate = document.getElementById('can-bitrate').value;
             await canSerial.connect(bitrate);
@@ -23,7 +81,7 @@ const ui = {
             await canSerial.disconnect();
         });
 
-        // Serial Controller connection
+        // Serial Controller 接続
         document.getElementById('btn-connect-serial-ctrl').addEventListener('click', async () => {
             const bitrate = document.getElementById('serial-ctrl-bitrate').value;
             await controllerSerial.connect(bitrate);
@@ -33,13 +91,13 @@ const ui = {
             await controllerSerial.disconnect();
         });
 
-        // Auto Trigger Engine Toggle
+        // オートトリガーエンジン トグル
         document.getElementById('toggle-trigger-engine').addEventListener('change', (e) => {
             window.altairState.autoTriggerEngine = e.target.checked;
             this.log("System", `Auto Trigger Engine is now ${e.target.checked ? 'ON' : 'OFF'}`);
         });
 
-        // Blockly Run Macro button
+        // Blockly マクロ操作ボタン
         document.getElementById('btn-run-macro').addEventListener('click', () => {
             if(window.automation) window.automation.runMacro();
         });
@@ -63,6 +121,11 @@ const ui = {
         
         document.getElementById(viewId).classList.add('active');
         document.querySelector(`.nav-item[data-target="${viewId}"]`).classList.add('active');
+
+        // モバイル時はビュー切り替えと同時にサイドバーとオーバーレイを閉じる
+        document.querySelector('.sidebar').classList.remove('sidebar-open');
+        const ov = document.getElementById('sidebar-overlay');
+        if (ov) ov.classList.remove('active');
 
         // Blockly resize hack
         if(viewId === 'view-automation' && window.automation && window.automation.workspace) {
@@ -221,11 +284,13 @@ const ui = {
                 <div class="card-body">
                     ${contentHtml}
                 </div>
-                <div class="card-footer" style="margin-top:15px; border-top:1px solid var(--border-color); padding-top:10px;">
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                        <input type="checkbox" onchange="ui.toggleTx('${m.id}', this.checked)" ${m.txEnabled ? 'checked' : ''}>
-                        <span style="font-weight:600; font-size:0.9rem;">Enable TX</span>
-                    </label>
+                <div class="card-footer">
+                    <button id="tx-btn-${m.id}"
+                        class="tx-toggle-btn ${m.txEnabled ? 'tx-on' : 'tx-off'}"
+                        onclick="ui.toggleTx('${m.id}')">
+                        <i class="fa-solid ${m.txEnabled ? 'fa-tower-broadcast' : 'fa-ban'}"></i>
+                        TX ${m.txEnabled ? 'ENABLED' : 'DISABLED'}
+                    </button>
                 </div>
             `;
             dash.appendChild(card);
@@ -250,12 +315,13 @@ const ui = {
             html += `
                 <div style="border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
                     <div class="control-row" style="margin-bottom: 10px;">
-                        <label style="font-weight: 800; color: var(--primary-color);">M${i+1} Tgt</label>
+                        <label style="font-weight: 800; color: var(--primary-color); min-width:50px;">M${i+1} Tgt</label>
                         <div class="slider-container">
-                            <input type="range" min="-32767" max="32767" value="${motor.target}" 
-                                oninput="ui.updateMddTarget('${m.id}', ${i}, this.value)" 
-                                onchange="ui.updateMddTarget('${m.id}', ${i}, this.value)">
-                            <span class="val-display" id="mdd-val-${m.id}-${i}">${motor.target}</span>
+                            <input type="range" id="mdd-slider-${m.id}-${i}" min="-32767" max="32767" value="${motor.target}"
+                                oninput="ui.updateMddTarget('${m.id}', ${i}, this.value, 'slider')">
+                            <input type="number" id="mdd-val-${m.id}-${i}" class="target-num-input"
+                                min="-32767" max="32767" step="1" value="${motor.target}"
+                                oninput="ui.updateMddTarget('${m.id}', ${i}, this.value, 'input')">
                         </div>
                     </div>
                     <!-- Params -->
@@ -306,10 +372,11 @@ const ui = {
                 <div class="control-row">
                     <label>CH${i+1}</label>
                     <div class="slider-container">
-                        <input type="range" min="0" max="180" value="${m.ch[i]}" 
-                            oninput="ui.updateServoTarget('${m.id}', ${i}, this.value)" 
-                            onchange="ui.updateServoTarget('${m.id}', ${i}, this.value)">
-                        <span class="val-display" id="servo-val-${m.id}-${i}">${m.ch[i]}</span>
+                        <input type="range" id="servo-slider-${m.id}-${i}" min="0" max="180" value="${m.ch[i]}"
+                            oninput="ui.updateServoTarget('${m.id}', ${i}, this.value, 'slider')">
+                        <input type="number" id="servo-val-${m.id}-${i}" class="target-num-input servo-num"
+                            min="0" max="180" step="1" value="${m.ch[i]}"
+                            oninput="ui.updateServoTarget('${m.id}', ${i}, this.value, 'input')">
                     </div>
                 </div>
             `;
@@ -336,12 +403,18 @@ const ui = {
     },
 
     // --- Control Handlers ---
-    toggleTx: function(id, enabled) {
+    toggleTx: function(id) {
         const m = window.altairState.modulesById[id];
-        if(m) {
-            m.txEnabled = enabled;
-            this.log("System", `TX ${enabled ? 'Enabled' : 'Disabled'} for ${m.name}`);
+        if (!m) return;
+        // TX状態をトグル
+        m.txEnabled = !m.txEnabled;
+        // ボタンUIを更新
+        const btn = document.getElementById(`tx-btn-${id}`);
+        if (btn) {
+            btn.className = `tx-toggle-btn ${m.txEnabled ? 'tx-on' : 'tx-off'}`;
+            btn.innerHTML = `<i class="fa-solid ${m.txEnabled ? 'fa-tower-broadcast' : 'fa-ban'}"></i> TX ${m.txEnabled ? 'ENABLED' : 'DISABLED'}`;
         }
+        this.log("System", `TX ${m.txEnabled ? 'Enabled' : 'Disabled'} for ${m.name}`);
     },
 
     reqMddParams: function(id) {
@@ -353,13 +426,22 @@ const ui = {
         }
     },
 
-    updateMddTarget: function(id, motorIdx, val) {
+    updateMddTarget: function(id, motorIdx, val, source) {
         const m = window.altairState.modulesById[id];
-        if(m) {
-            m.motors[motorIdx].target = parseInt(val);
-            document.getElementById(`mdd-val-${id}-${motorIdx}`).innerText = val;
-            if(m.txEnabled && window.canSerial && window.canSerial.writer) {
-                if(m.state.appMode === 1 && m.state.paramSetupCompleted) canSerial.sendMddTarget(m);
+        if (m) {
+            const numVal = parseInt(val);
+            m.motors[motorIdx].target = numVal;
+            // スライダーと数値入力を双方向で同期
+            if (source !== 'input') {
+                const numEl = document.getElementById(`mdd-val-${id}-${motorIdx}`);
+                if (numEl) numEl.value = numVal;
+            }
+            if (source !== 'slider') {
+                const sliderEl = document.getElementById(`mdd-slider-${id}-${motorIdx}`);
+                if (sliderEl) sliderEl.value = numVal;
+            }
+            if (m.txEnabled && window.canSerial && window.canSerial.writer) {
+                if (m.state.appMode === 1 && m.state.paramSetupCompleted) canSerial.sendMddTarget(m);
             }
         }
     },
@@ -372,12 +454,21 @@ const ui = {
         }
     },
 
-    updateServoTarget: function(id, chIdx, val) {
+    updateServoTarget: function(id, chIdx, val, source) {
         const m = window.altairState.modulesById[id];
-        if(m) {
-            m.ch[chIdx] = parseInt(val);
-            document.getElementById(`servo-val-${id}-${chIdx}`).innerText = val;
-            if(m.txEnabled && window.canSerial && window.canSerial.writer) {
+        if (m) {
+            const numVal = parseInt(val);
+            m.ch[chIdx] = numVal;
+            // スライダーと数値入力を双方向で同期
+            if (source !== 'input') {
+                const numEl = document.getElementById(`servo-val-${id}-${chIdx}`);
+                if (numEl) numEl.value = numVal;
+            }
+            if (source !== 'slider') {
+                const sliderEl = document.getElementById(`servo-slider-${id}-${chIdx}`);
+                if (sliderEl) sliderEl.value = numVal;
+            }
+            if (m.txEnabled && window.canSerial && window.canSerial.writer) {
                 canSerial.sendServoTarget(m);
             }
         }

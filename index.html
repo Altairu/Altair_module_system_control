@@ -17,6 +17,17 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+    <!-- サイドバーオーバーレイ（モバイル用） -->
+    <div id="sidebar-overlay"></div>
+
+    <!-- ハンバーガーボタン（モバイル用） -->
+    <button id="btn-hamburger" aria-label="メニューを開く" title="メニュー">
+        <i class="fa-solid fa-bars"></i>
+    </button>
+
+    <!-- インポート用の隠しファイル入力 -->
+    <input type="file" id="import-config-input" accept=".json" style="display:none;">
+
     <div id="app-container">
         <!-- サイドバー -->
         <aside class="sidebar glass-panel">
@@ -64,6 +75,14 @@
                 <button class="nav-item" data-target="view-controller"><i class="fa-solid fa-gamepad"></i> Controller</button>
                 <button class="nav-item" data-target="view-logs"><i class="fa-solid fa-terminal"></i> Logs</button>
                 <button class="nav-item" data-target="view-help"><i class="fa-solid fa-circle-question"></i> Help</button>
+
+                <!-- テーマ切り替えボタン -->
+                <div class="theme-toggle-row">
+                    <button id="btn-theme-toggle" class="btn-theme" title="ライトテーマに切り替え">
+                        <i class="fa-solid fa-sun"></i>
+                    </button>
+                    <span class="theme-label">テーマ</span>
+                </div>
             </div>
         </aside>
 
@@ -74,6 +93,8 @@
                 <header class="view-header glass-panel">
                     <h2>Dashboard</h2>
                     <div class="header-actions">
+                        <button id="btn-export-config" class="btn btn-icon" title="設定をJSONファイルにエクスポート"><i class="fa-solid fa-file-export"></i></button>
+                        <button id="btn-import-config" class="btn btn-icon" title="JSONファイルから設定をインポート"><i class="fa-solid fa-file-import"></i></button>
                         <button class="btn btn-icon" onclick="storage.saveConfig()" title="Save Config"><i class="fa-solid fa-save"></i></button>
                         <button class="btn btn-icon btn-danger" onclick="storage.clearConfig()" title="Reset Config"><i class="fa-solid fa-trash-can"></i></button>
                     </div>
