@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "altair_module_system_control"
-version = "2.0.0"
+version = "2.0.5"
 dependencies = [
  "axum",
  "futures-util",

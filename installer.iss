@@ -3,7 +3,7 @@
 
 #define MyAppName "Altair Module System Control"
 #ifndef MyAppVersion
-#define MyAppVersion "2.0.3"
+#define MyAppVersion "2.0.5"
 #endif
 #define MyAppPublisher "Altair"
 #define MyAppURL "https://github.com/Altairu/Altair_module_system_control"

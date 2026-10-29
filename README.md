@@ -34,6 +34,16 @@ flowchart LR
 * デスクトップまたはスタートメニューに作成された `Altair Module System Control` のショートカットから起動できます。
 * アプリの更新は起動時に自動確認され、画面上のボタンから最新バージョンへそのまま更新できます。
 
+
+![alt text](image.png)
+
+altair_module_system_control_setup.exeを起動します
+
+![alt text](image-1.png)
+
+![alt text](image-2.png)
+
+
 ## 起動とビルド方法
 
 ビルド済みの実行ファイルを直接起動する場合は、プロジェクトルートにある実行ファイルを実行します。
@@ -53,6 +63,7 @@ flowchart LR
 ```powershell
 cargo build --release
 ```
+
 
 ## GitHub Actions による自動ビルドと自動アップデート
 
