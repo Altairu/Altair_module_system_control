@@ -96,22 +96,28 @@ impl BehaviorRunner {
         fs::read_to_string(&xml_path).unwrap_or_default()
     }
 
+    pub fn get_behaviors_dir(&self) -> PathBuf {
+        self.behaviors_dir.clone()
+    }
+
     fn sanitize_py_filename(name: &str) -> Result<String, String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err("ファイル名が空です。".to_string());
         }
-        let mut safe = PathBuf::from(trimmed)
+        let safe = PathBuf::from(trimmed)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        if safe.is_empty() || safe.contains("..") {
+        if safe.is_empty() || safe.contains("..") || safe.contains('/') || safe.contains('\\') {
             return Err("無効なファイル名です。".to_string());
         }
-        if !safe.ends_with(".py") {
-            safe.push_str(".py");
-        }
-        Ok(safe)
+        let clean = if !safe.ends_with(".py") {
+            format!("{}.py", safe)
+        } else {
+            safe
+        };
+        Ok(clean)
     }
 
     pub fn read_behavior_file(&self, name: &str) -> Result<(String, String), String> {
@@ -166,14 +172,7 @@ impl BehaviorRunner {
     pub fn start_behavior(&self, script_name: &str) -> Result<String, String> {
         self.stop_behavior();
 
-        let safe_name = PathBuf::from(script_name)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        if safe_name.is_empty() {
-            return Err("スクリプト名が指定されていません。".to_string());
-        }
+        let safe_name = Self::sanitize_py_filename(script_name)?;
 
         let script_path = self.behaviors_dir.join(&safe_name);
         if !script_path.exists() {

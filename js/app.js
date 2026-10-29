@@ -1106,74 +1106,27 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- 動作プログラムファイル一覧の動的取得とコードエディタ連携 ---
-  const txtBehaviorEditor = document.getElementById("txt-behavior-editor");
-  const lblEditingFilename = document.getElementById("lbl-editing-filename");
-  const lblEditorDirty = document.getElementById("lbl-editor-dirty");
-  const btnSaveBehaviorCode = document.getElementById("btn-save-behavior-code");
+  // --- 動作プログラムファイル一覧の動的取得とフォルダー連携 ---
   const btnRefreshBehaviorList = document.getElementById("btn-refresh-behavior-list");
   const btnDeleteBehavior = document.getElementById("btn-delete-behavior");
   const txtNewBehaviorName = document.getElementById("txt-new-behavior-name");
   const btnCreateBehavior = document.getElementById("btn-create-behavior");
+  const btnOpenBehaviorFolder = document.getElementById("btn-open-behavior-folder");
 
-  let editorDirty = false;
-  let currentEditingScript = "";
-
-  function setEditorDirty(flag) {
-    editorDirty = flag;
-    if (lblEditorDirty) {
-      lblEditorDirty.style.display = flag ? "inline" : "none";
-    }
-  }
-
-  async function loadBehaviorCodeToEditor(filename) {
-    if (!filename) {
-      currentEditingScript = "";
-      if (lblEditingFilename) lblEditingFilename.textContent = "未選択";
-      if (txtBehaviorEditor) txtBehaviorEditor.value = "";
-      setEditorDirty(false);
-      return;
-    }
-    try {
-      const res = await fetch(`/api/behavior/read?name=${encodeURIComponent(filename)}`);
-      const data = await res.json();
-      if (data.success) {
-        currentEditingScript = data.name;
-        if (lblEditingFilename) lblEditingFilename.textContent = data.name;
-        if (txtBehaviorEditor) txtBehaviorEditor.value = data.code;
-        setEditorDirty(false);
-      } else {
-        appendTerminalLog(el.behaviorTerminal, `[ERROR] ファイル読み込み失敗: ${data.message}`, "error-msg");
-      }
-    } catch (err) {
-      appendTerminalLog(el.behaviorTerminal, `[ERROR] ファイル読み込み通信エラー: ${err}`, "error-msg");
-    }
-  }
-
-  async function saveCurrentBehaviorCode(silent = false) {
-    const filename = currentEditingScript || el.selBehaviorScript.value;
-    if (!filename || !txtBehaviorEditor) return false;
-    try {
-      const res = await fetch("/api/behavior/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: filename, code: txtBehaviorEditor.value })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setEditorDirty(false);
-        if (!silent) {
+  if (btnOpenBehaviorFolder) {
+    btnOpenBehaviorFolder.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/behavior/open_folder", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
           appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+        } else {
+          appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
         }
-        return true;
-      } else {
-        appendTerminalLog(el.behaviorTerminal, `[ERROR] 保存失敗: ${data.message}`, "error-msg");
-        return false;
+      } catch (err) {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] フォルダーを開けませんでした: ${err}`, "error-msg");
       }
-    } catch (err) {
-      appendTerminalLog(el.behaviorTerminal, `[ERROR] 保存通信エラー: ${err}`, "error-msg");
-      return false;
-    }
+    });
   }
 
   async function refreshBehaviors(preferredSelect = "") {
@@ -1194,7 +1147,6 @@ document.addEventListener("DOMContentLoaded", () => {
       // 取得したファイル一覧をオプションとして追加
       if (data.behaviors.length === 0) {
         el.selBehaviorScript.innerHTML = '<option value="">プログラムファイルがありません</option>';
-        await loadBehaviorCodeToEditor("");
       } else {
         data.behaviors.forEach(filename => {
           const option = document.createElement("option");
@@ -1205,7 +1157,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (prevSelect && data.behaviors.includes(prevSelect)) {
           el.selBehaviorScript.value = prevSelect;
         }
-        await loadBehaviorCodeToEditor(el.selBehaviorScript.value);
       }
     } catch (err) {
       console.error("プログラムファイル取得失敗:", err);
@@ -1213,45 +1164,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  if (el.selBehaviorScript) {
-    el.selBehaviorScript.addEventListener("change", async () => {
-      if (editorDirty && !confirm("未保存のコード変更があります。破棄して別のファイルを読み込みますか？")) {
-        el.selBehaviorScript.value = currentEditingScript;
-        return;
-      }
-      await loadBehaviorCodeToEditor(el.selBehaviorScript.value);
-    });
-  }
-
-  if (txtBehaviorEditor) {
-    txtBehaviorEditor.addEventListener("input", () => {
-      setEditorDirty(true);
-    });
-    txtBehaviorEditor.addEventListener("keydown", async (e) => {
-      // Tabキーでスペース4つ挿入
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const start = txtBehaviorEditor.selectionStart;
-        const end = txtBehaviorEditor.selectionEnd;
-        const val = txtBehaviorEditor.value;
-        txtBehaviorEditor.value = val.substring(0, start) + "    " + val.substring(end);
-        txtBehaviorEditor.selectionStart = txtBehaviorEditor.selectionEnd = start + 4;
-        setEditorDirty(true);
-      }
-      // Ctrl+S / Cmd+S で保存
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        await saveCurrentBehaviorCode(false);
-      }
-    });
-  }
-
-  if (btnSaveBehaviorCode) {
-    btnSaveBehaviorCode.addEventListener("click", () => saveCurrentBehaviorCode(false));
-  }
-
   if (btnRefreshBehaviorList) {
-    btnRefreshBehaviorList.addEventListener("click", () => refreshBehaviors(currentEditingScript));
+    btnRefreshBehaviorList.addEventListener("click", () => refreshBehaviors());
   }
 
   if (btnCreateBehavior && txtNewBehaviorName) {
@@ -1296,7 +1210,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const data = await res.json();
         if (data.success) {
           appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
-          setEditorDirty(false);
           await refreshBehaviors();
         } else {
           appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
@@ -1412,8 +1325,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 11. 動作プログラム(Behavior)の起動 ＆ 停止制御 ---
   el.btnStartBehavior.addEventListener("click", async () => {
     const script = el.selBehaviorScript.value;
-    if (editorDirty && currentEditingScript === script) {
-      await saveCurrentBehaviorCode(true);
+    if (!script) {
+      alert("実行するスクリプトを選択してください。");
+      return;
     }
     appendTerminalLog(el.behaviorTerminal, `プログラム '${script}' の起動要求を送信...`);
     try {

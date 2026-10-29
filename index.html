@@ -58,69 +58,29 @@
         </a>
       </nav>
 
-      <div class="sidebar-footer">
-        <span class="version-tag" id="lbl-sidebar-version">Altair Control v2.0.0</span>
+      <div class="sidebar-footer" style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span class="version-tag" id="lbl-sidebar-version">v2.0.0</span>
+          <button class="btn btn-secondary btn-xs" id="btn-check-update" style="font-size: 11px; padding: 2px 8px;">
+            更新確認
+          </button>
+        </div>
+        <button class="btn btn-primary btn-xs" id="btn-apply-update" style="display: none; width: 100%;">
+          <i class="fa-solid fa-cloud-arrow-down"></i> 最新版へ更新
+        </button>
       </div>
     </aside>
 
     <!-- メインコンテンツエリア -->
     <main class="main-content">
 
-      <!-- デスクトップアプリ風 メニューバー (ファイル / ヘルプ) -->
-      <div class="win-menubar">
-        <div class="win-menu-dropdown">
-          <button class="win-menu-trigger" id="menu-trigger-file">ファイル</button>
-          <div class="win-menu-list" id="menu-list-file">
-            <button class="win-menu-item" id="menu-item-import-profile">
-              <i class="fa-solid fa-file-import"></i> 設定ファイル (JSON) を読み込む...
-            </button>
-            <button class="win-menu-item" id="menu-item-export-profile">
-              <i class="fa-solid fa-file-export"></i> 現在の設定を書き出す...
-            </button>
-            <div class="win-menu-divider"></div>
-            <button class="win-menu-item" id="menu-item-reload">
-              <i class="fa-solid fa-rotate-right"></i> 画面を再読み込み
-            </button>
-          </div>
-        </div>
-
-        <div class="win-menu-dropdown">
-          <button class="win-menu-trigger" id="menu-trigger-help">ヘルプ</button>
-          <div class="win-menu-list" id="menu-list-help">
-            <button class="win-menu-item" id="menu-item-check-update">
-              <i class="fa-solid fa-arrows-rotate"></i> 更新を確認...
-            </button>
-            <button class="win-menu-item" id="menu-item-report-issue">
-              <i class="fa-solid fa-bug"></i> 不具合を報告 (GitHub Issues)...
-            </button>
-            <div class="win-menu-divider"></div>
-            <button class="win-menu-item" id="menu-item-about">
-              <i class="fa-solid fa-circle-info"></i> ヘルプ / 権利情報
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- アプリタイトル ＆ ツールアクションバー -->
-      <div class="app-toolbar-banner">
-        <div class="app-toolbar-left">
-          <span class="app-toolbar-title">Altair Module System Control</span>
-          <span class="app-version-pill" id="lbl-app-version">v2.0.0</span>
-          <button class="app-btn app-btn-update-ready" id="btn-apply-update" style="display: none;">
-            <i class="fa-solid fa-cloud-arrow-down"></i> 最新版へ今すぐ更新
-          </button>
-        </div>
-        <div class="app-toolbar-right">
-          <button class="app-btn app-btn-report" id="btn-report-issue">不具合を報告</button>
-          <button class="app-btn app-btn-neutral" id="btn-check-update">更新を確認</button>
-          <button class="app-btn app-btn-neutral" id="btn-help-info">ヘルプ / 権利情報</button>
-        </div>
-      </div>
-
       <!-- ヘッダー -->
       <header class="main-header">
         <div class="header-title">
-          <h1 id="page-title">Dashboard</h1>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h1 id="page-title">Dashboard</h1>
+            <span class="app-version-pill" id="lbl-app-version">v2.0.0</span>
+          </div>
           <p class="subtitle">Altair Module System 一括管理コンソール</p>
         </div>
 
@@ -460,7 +420,7 @@
           <!-- 左カラム: スクリプト管理 ＆ 実行制御 -->
           <div class="glass-card behavior-list-card">
             <h2><i class="fa-solid fa-terminal"></i> 動作プログラム管理</h2>
-            <p class="group-desc">user_behaviors 内の Python スクリプトを新規作成、編集、保存、実行します。</p>
+            <p class="group-desc">user_behaviors フォルダー内の Python 動作スクリプトを選択して起動・停止します。</p>
 
             <div class="behavior-selector">
               <h3>プログラムファイル選択</h3>
@@ -472,19 +432,29 @@
                   <i class="fa-solid fa-rotate-right"></i> 一覧更新
                 </button>
                 <button class="btn btn-danger btn-xs" id="btn-delete-behavior" style="flex: 1;">
-                  <i class="fa-solid fa-trash"></i> 選択ファイルを削除
+                  <i class="fa-solid fa-trash"></i> 削除
                 </button>
               </div>
+            </div>
+
+            <!-- フォルダーを開く（エクスプローラー / VSCode 用） -->
+            <div style="background: #f8f9fa; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+              <button class="btn btn-primary btn-block" id="btn-open-behavior-folder" style="font-weight: 600; font-size: 13px;">
+                <i class="fa-solid fa-folder-open"></i> スクリプトのフォルダーを開く
+              </button>
+              <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
+                エクスプローラーが開きます。VSCodeなどのエディタで直接プログラムを編集できます。
+              </p>
             </div>
 
             <!-- 新規スクリプト作成フォーム -->
             <div style="background: #f8f9fa; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px; margin-bottom: 18px;">
               <h4 style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">
-                <i class="fa-solid fa-file-circle-plus"></i> 新規スクリプト作成 (テンプレート複製)
+                <i class="fa-solid fa-file-circle-plus"></i> 新規スクリプト作成
               </h4>
               <div style="display: flex; gap: 6px;">
                 <input type="text" id="txt-new-behavior-name" class="form-input form-input-sm" placeholder="例: my_robot.py" style="flex: 1; font-size: 12px;">
-                <button class="btn btn-primary btn-sm" id="btn-create-behavior" style="white-space: nowrap;">
+                <button class="btn btn-secondary btn-sm" id="btn-create-behavior" style="white-space: nowrap;">
                   <i class="fa-solid fa-plus"></i> 作成
                 </button>
               </div>
@@ -492,7 +462,7 @@
 
             <div class="behavior-controls-row">
               <button class="btn btn-success btn-lg btn-block" id="btn-start-behavior">
-                <i class="fa-solid fa-play"></i> 保存して起動 (Save &amp; Start)
+                <i class="fa-solid fa-play"></i> 起動 (Start Program)
               </button>
               <button class="btn btn-danger btn-lg btn-block" id="btn-stop-behavior" disabled>
                 <i class="fa-solid fa-circle-stop"></i> 停止 (Stop Program)
@@ -507,34 +477,17 @@
             </div>
           </div>
 
-          <!-- 右カラム: Python コードエディタ ＆ リアルタイム出力コンソール -->
-          <div style="display: flex; flex-direction: column; gap: 20px;">
-            <!-- Python コードエディタカード -->
-            <div class="glass-card behavior-editor-card">
-              <div class="console-header">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <h3><i class="fa-solid fa-file-code"></i> Python スクリプトエディタ</h3>
-                  <span class="app-version-pill" id="lbl-editing-filename">未選択</span>
-                  <span id="lbl-editor-dirty" style="display: none; font-size: 11px; font-weight: 600; color: var(--color-warning);">未保存の変更あり</span>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <button class="btn btn-primary btn-sm" id="btn-save-behavior-code">
-                    <i class="fa-solid fa-floppy-disk"></i> 保存 (Ctrl+S)
-                  </button>
-                </div>
-              </div>
-              <textarea id="txt-behavior-editor" class="behavior-code-textarea" spellcheck="false" placeholder="左側のリストからファイルを選択するとここにPythonコードが表示されます..."></textarea>
-            </div>
-
-            <!-- ログコンソール (ターミナル風) -->
-            <div class="glass-card behavior-console-card">
-              <div class="console-header">
+          <!-- 右カラム: リアルタイム出力コンソール（広々とした大画面） -->
+          <div class="glass-card behavior-console-card" style="display: flex; flex-direction: column;">
+            <div class="console-header">
+              <div style="display: flex; align-items: center; gap: 10px;">
                 <h3><i class="fa-solid fa-rectangle-list"></i> リアルタイムプログラム出力</h3>
-                <button class="btn btn-secondary btn-xs" id="btn-clear-console">Clear Console</button>
+                <span class="app-version-pill" id="lbl-active-running-script" style="display: none;">実行中</span>
               </div>
-              <div class="terminal-view" id="behavior-terminal" style="min-height: 220px; max-height: 260px;">
-                <div class="terminal-line system-msg">[SYSTEM] 動作プログラム起動時に標準出力・標準エラーがここにリアルタイムストリーミングされます。</div>
-              </div>
+              <button class="btn btn-secondary btn-xs" id="btn-clear-console">Clear Console</button>
+            </div>
+            <div class="terminal-view" id="behavior-terminal" style="flex-grow: 1; min-height: 520px;">
+              <div class="terminal-line system-msg">[SYSTEM] 動作プログラム起動時に標準出力・標準エラーがここにリアルタイムストリーミングされます。</div>
             </div>
           </div>
         </div>

@@ -206,8 +206,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/behavior/stop", post(api_behavior_stop))
         .route("/api/behavior/save_blockly", post(api_save_blockly))
         .route("/api/behavior/list", get(api_behavior_list))
-        .route("/api/behavior/read", get(api_behavior_read))
-        .route("/api/behavior/save", post(api_behavior_save))
+        .route("/api/behavior/open_folder", post(api_behavior_open_folder))
         .route("/api/behavior/create", post(api_behavior_create))
         .route("/api/behavior/delete", post(api_behavior_delete))
         .route(
@@ -401,48 +400,33 @@ async fn api_behavior_list(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-async fn api_behavior_read(
-    State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let name = params.get("name").cloned().unwrap_or_default();
-    match state.behavior_runner.read_behavior_file(&name) {
-        Ok((fname, code)) => (
-            StatusCode::OK,
-            Json(json!({ "success": true, "name": fname, "code": code })),
-        ),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "message": err })),
-        ),
-    }
-}
+async fn api_behavior_open_folder(State(state): State<AppState>) -> impl IntoResponse {
+    let dir = state.behavior_runner.get_behaviors_dir();
+    let path_str = dir.to_string_lossy().to_string();
 
-#[derive(Deserialize)]
-struct BehaviorSaveReq {
-    name: String,
-    #[serde(default)]
-    code: String,
-}
-
-async fn api_behavior_save(
-    State(state): State<AppState>,
-    Json(req): Json<BehaviorSaveReq>,
-) -> impl IntoResponse {
-    match state.behavior_runner.save_behavior_file(&req.name, &req.code) {
-        Ok(fname) => (
-            StatusCode::OK,
-            Json(json!({
-                "success": true,
-                "name": fname,
-                "message": format!("'{}' を保存しました。", fname)
-            })),
-        ),
-        Err(err) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "message": err })),
-        ),
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(&path_str)
+            .spawn();
     }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&path_str)
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(&path_str)
+            .spawn();
+    }
+
+    Json(json!({
+        "success": true,
+        "message": format!("フォルダーを開きました: {}", path_str)
+    }))
 }
 
 #[derive(Deserialize)]
@@ -519,6 +503,12 @@ async fn api_profiles_load(
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
+    if safe_name.is_empty() || safe_name.contains("..") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "detail": "不正なプロファイル名です。" })),
+        );
+    }
     let src = state.profiles_dir.join(format!("{}.json", safe_name));
     if !src.exists() {
         return (
@@ -555,10 +545,10 @@ async fn api_profiles_save(
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    if safe_name.is_empty() {
+    if safe_name.is_empty() || safe_name.contains("..") {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "detail": "プロファイル名が空です。" })),
+            Json(json!({ "success": false, "detail": "不正なプロファイル名です。" })),
         );
     }
 
@@ -591,6 +581,12 @@ async fn api_profiles_delete(
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
+    if safe_name.is_empty() || safe_name.contains("..") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "detail": "不正なプロファイル名です。" })),
+        );
+    }
     let target = state.profiles_dir.join(format!("{}.json", safe_name));
     if !target.exists() {
         return (

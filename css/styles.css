@@ -191,197 +191,15 @@ body {
 
 /* --- 5. メインコンテンツエリア --- */
 .main-content {
-  padding: 0 36px 40px 36px;
+  padding: 40px 48px;
   overflow-y: auto;
   height: 100vh;
 }
 
 @media (max-width: 768px) {
   .main-content {
-    padding: 0 18px 24px 18px;
+    padding: 24px;
   }
-}
-
-/* Windows ネイティブ風メニューバー (ファイル / ヘルプ) */
-.win-menubar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin: 0 -36px;
-  padding: 2px 14px;
-  background-color: #f9fafb;
-  border-bottom: 1px solid #e2e5e9;
-  font-size: 12px;
-  user-select: none;
-  position: sticky;
-  top: 0;
-  z-index: 50;
-}
-
-.win-menu-dropdown {
-  position: relative;
-}
-
-.win-menu-trigger {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  padding: 3px 10px;
-  font-size: 12px;
-  color: #3c4043;
-  cursor: pointer;
-  font-family: var(--font-main);
-}
-
-.win-menu-trigger:hover,
-.win-menu-dropdown.open .win-menu-trigger {
-  background-color: #e8eaed;
-  color: #202124;
-}
-
-.win-menu-list {
-  display: none;
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  min-width: 230px;
-  background-color: #ffffff;
-  border: 1px solid #dadce0;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(60, 64, 67, 0.18);
-  padding: 4px 0;
-  z-index: 100;
-}
-
-.win-menu-dropdown.open .win-menu-list {
-  display: block;
-}
-
-.win-menu-item {
-  width: 100%;
-  background: none;
-  border: none;
-  text-align: left;
-  padding: 7px 14px;
-  font-size: 12px;
-  color: #202124;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-main);
-}
-
-.win-menu-item i {
-  width: 14px;
-  color: #5f6368;
-  text-align: center;
-}
-
-.win-menu-item:hover {
-  background-color: #e8f0fe;
-  color: #1a73e8;
-}
-
-.win-menu-item:hover i {
-  color: #1a73e8;
-}
-
-.win-menu-divider {
-  height: 1px;
-  background-color: #e8eaed;
-  margin: 4px 0;
-}
-
-/* アプリタイトル ＆ ツールアクションバー (添付画像スタイル) */
-.app-toolbar-banner {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 0 -36px 24px -36px;
-  padding: 12px 24px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e2e5e9;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.app-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.app-toolbar-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #111827;
-  letter-spacing: -0.2px;
-}
-
-.app-version-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #eef2ff;
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 4px;
-  letter-spacing: 0.2px;
-}
-
-.app-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.app-btn {
-  border: 1px solid transparent;
-  border-radius: 4px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition-smooth);
-  font-family: var(--font-main);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.app-btn-report {
-  background-color: #fef2f2;
-  color: #dc2626;
-  border-color: #fee2e2;
-}
-
-.app-btn-report:hover {
-  background-color: #fee2e2;
-  color: #b91c1c;
-}
-
-.app-btn-neutral {
-  background-color: #f1f5f9;
-  color: #1e293b;
-  border-color: #e2e8f0;
-}
-
-.app-btn-neutral:hover {
-  background-color: #e2e8f0;
-  color: #0f172a;
-}
-
-.app-btn-update-ready {
-  background-color: #2563eb;
-  color: #ffffff;
-}
-
-.app-btn-update-ready:hover {
-  background-color: #1d4ed8;
 }
 
 /* ヘッダー */
@@ -979,7 +797,7 @@ body {
 /* --- 12. 動作プログラム(Behavior)用のレイアウト --- */
 .behavior-layout {
   display: grid;
-  grid-template-columns: 350px 1fr;
+  grid-template-columns: 360px 1fr;
   gap: 28px;
 }
 
@@ -997,32 +815,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.behavior-editor-card {
-  display: flex;
-  flex-direction: column;
-}
-
-.behavior-code-textarea {
-  width: 100%;
-  min-height: 380px;
-  background-color: #1e1e1e;
-  color: #e8eaed;
-  border: 1px solid #3c4043;
-  border-radius: 10px;
-  padding: 16px;
-  font-family: 'Consolas', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.55;
-  resize: vertical;
-  outline: none;
-  tab-size: 4;
-}
-
-.behavior-code-textarea:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
 }
 
 .terminal-view {
