@@ -17,7 +17,7 @@ axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 futures-util = "0.3"
 serialport = "4"
-self_update = { version = "0.41", default-features = false, features = ["rustls", "archive-zip"] }
+self_update = { version = "0.41", default-features = false, features = ["rustls", "archive-zip", "compression-zip-deflate", "compression-zip-bzip2"] }
 
 [profile.release]
 panic = "abort"
