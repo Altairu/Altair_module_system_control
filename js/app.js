@@ -1106,9 +1106,79 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- 動作プログラムファイル一覧の動的取得と表示 ---
-  async function refreshBehaviors() {
+  // --- 動作プログラムファイル一覧の動的取得とコードエディタ連携 ---
+  const txtBehaviorEditor = document.getElementById("txt-behavior-editor");
+  const lblEditingFilename = document.getElementById("lbl-editing-filename");
+  const lblEditorDirty = document.getElementById("lbl-editor-dirty");
+  const btnSaveBehaviorCode = document.getElementById("btn-save-behavior-code");
+  const btnRefreshBehaviorList = document.getElementById("btn-refresh-behavior-list");
+  const btnDeleteBehavior = document.getElementById("btn-delete-behavior");
+  const txtNewBehaviorName = document.getElementById("txt-new-behavior-name");
+  const btnCreateBehavior = document.getElementById("btn-create-behavior");
+
+  let editorDirty = false;
+  let currentEditingScript = "";
+
+  function setEditorDirty(flag) {
+    editorDirty = flag;
+    if (lblEditorDirty) {
+      lblEditorDirty.style.display = flag ? "inline" : "none";
+    }
+  }
+
+  async function loadBehaviorCodeToEditor(filename) {
+    if (!filename) {
+      currentEditingScript = "";
+      if (lblEditingFilename) lblEditingFilename.textContent = "未選択";
+      if (txtBehaviorEditor) txtBehaviorEditor.value = "";
+      setEditorDirty(false);
+      return;
+    }
     try {
+      const res = await fetch(`/api/behavior/read?name=${encodeURIComponent(filename)}`);
+      const data = await res.json();
+      if (data.success) {
+        currentEditingScript = data.name;
+        if (lblEditingFilename) lblEditingFilename.textContent = data.name;
+        if (txtBehaviorEditor) txtBehaviorEditor.value = data.code;
+        setEditorDirty(false);
+      } else {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] ファイル読み込み失敗: ${data.message}`, "error-msg");
+      }
+    } catch (err) {
+      appendTerminalLog(el.behaviorTerminal, `[ERROR] ファイル読み込み通信エラー: ${err}`, "error-msg");
+    }
+  }
+
+  async function saveCurrentBehaviorCode(silent = false) {
+    const filename = currentEditingScript || el.selBehaviorScript.value;
+    if (!filename || !txtBehaviorEditor) return false;
+    try {
+      const res = await fetch("/api/behavior/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: filename, code: txtBehaviorEditor.value })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEditorDirty(false);
+        if (!silent) {
+          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+        }
+        return true;
+      } else {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] 保存失敗: ${data.message}`, "error-msg");
+        return false;
+      }
+    } catch (err) {
+      appendTerminalLog(el.behaviorTerminal, `[ERROR] 保存通信エラー: ${err}`, "error-msg");
+      return false;
+    }
+  }
+
+  async function refreshBehaviors(preferredSelect = "") {
+    try {
+      const prevSelect = preferredSelect || el.selBehaviorScript.value;
       const res = await fetch("/api/behavior/list");
       const data = await res.json();
 
@@ -1124,6 +1194,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // 取得したファイル一覧をオプションとして追加
       if (data.behaviors.length === 0) {
         el.selBehaviorScript.innerHTML = '<option value="">プログラムファイルがありません</option>';
+        await loadBehaviorCodeToEditor("");
       } else {
         data.behaviors.forEach(filename => {
           const option = document.createElement("option");
@@ -1131,11 +1202,110 @@ document.addEventListener("DOMContentLoaded", () => {
           option.textContent = filename;
           el.selBehaviorScript.appendChild(option);
         });
+        if (prevSelect && data.behaviors.includes(prevSelect)) {
+          el.selBehaviorScript.value = prevSelect;
+        }
+        await loadBehaviorCodeToEditor(el.selBehaviorScript.value);
       }
     } catch (err) {
       console.error("プログラムファイル取得失敗:", err);
       el.selBehaviorScript.innerHTML = '<option value="">通信エラー</option>';
     }
+  }
+
+  if (el.selBehaviorScript) {
+    el.selBehaviorScript.addEventListener("change", async () => {
+      if (editorDirty && !confirm("未保存のコード変更があります。破棄して別のファイルを読み込みますか？")) {
+        el.selBehaviorScript.value = currentEditingScript;
+        return;
+      }
+      await loadBehaviorCodeToEditor(el.selBehaviorScript.value);
+    });
+  }
+
+  if (txtBehaviorEditor) {
+    txtBehaviorEditor.addEventListener("input", () => {
+      setEditorDirty(true);
+    });
+    txtBehaviorEditor.addEventListener("keydown", async (e) => {
+      // Tabキーでスペース4つ挿入
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const start = txtBehaviorEditor.selectionStart;
+        const end = txtBehaviorEditor.selectionEnd;
+        const val = txtBehaviorEditor.value;
+        txtBehaviorEditor.value = val.substring(0, start) + "    " + val.substring(end);
+        txtBehaviorEditor.selectionStart = txtBehaviorEditor.selectionEnd = start + 4;
+        setEditorDirty(true);
+      }
+      // Ctrl+S / Cmd+S で保存
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        await saveCurrentBehaviorCode(false);
+      }
+    });
+  }
+
+  if (btnSaveBehaviorCode) {
+    btnSaveBehaviorCode.addEventListener("click", () => saveCurrentBehaviorCode(false));
+  }
+
+  if (btnRefreshBehaviorList) {
+    btnRefreshBehaviorList.addEventListener("click", () => refreshBehaviors(currentEditingScript));
+  }
+
+  if (btnCreateBehavior && txtNewBehaviorName) {
+    btnCreateBehavior.addEventListener("click", async () => {
+      const name = txtNewBehaviorName.value.trim();
+      if (!name) {
+        alert("新しいスクリプトのファイル名を入力してください (例: my_robot.py)");
+        return;
+      }
+      try {
+        const res = await fetch("/api/behavior/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.success) {
+          txtNewBehaviorName.value = "";
+          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+          await refreshBehaviors(data.name);
+        } else {
+          appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
+          alert(data.message);
+        }
+      } catch (err) {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] 作成エラー: ${err}`, "error-msg");
+      }
+    });
+  }
+
+  if (btnDeleteBehavior) {
+    btnDeleteBehavior.addEventListener("click", async () => {
+      const target = el.selBehaviorScript.value;
+      if (!target) return;
+      if (!confirm(`スクリプト '${target}' を本当に削除しますか？`)) return;
+      try {
+        const res = await fetch("/api/behavior/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: target })
+        });
+        const data = await res.json();
+        if (data.success) {
+          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+          setEditorDirty(false);
+          await refreshBehaviors();
+        } else {
+          appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
+          alert(data.message);
+        }
+      } catch (err) {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] 削除エラー: ${err}`, "error-msg");
+      }
+    });
   }
 
   // プロファイルのロード（グローバル関数化）
@@ -1242,6 +1412,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 11. 動作プログラム(Behavior)の起動 ＆ 停止制御 ---
   el.btnStartBehavior.addEventListener("click", async () => {
     const script = el.selBehaviorScript.value;
+    if (editorDirty && currentEditingScript === script) {
+      await saveCurrentBehaviorCode(true);
+    }
     appendTerminalLog(el.behaviorTerminal, `プログラム '${script}' の起動要求を送信...`);
     try {
       const res = await fetch("/api/behavior/start", {
@@ -1449,28 +1622,118 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshProfiles();
   refreshBehaviors();
 
-  // GitHub Releases アップデート確認・適用機能
+  // GitHub Releases アップデート確認・適用 ＆ デスクトップメニューバー制御
   const lblAppVersion = document.getElementById("lbl-app-version");
+  const lblSidebarVersion = document.getElementById("lbl-sidebar-version");
+  const lblAboutVer = document.getElementById("lbl-about-ver");
   const btnCheckUpdate = document.getElementById("btn-check-update");
   const btnApplyUpdate = document.getElementById("btn-apply-update");
+  const btnReportIssue = document.getElementById("btn-report-issue");
+  const btnHelpInfo = document.getElementById("btn-help-info");
+
+  // アップデート確認モーダル要素
+  const updateModal = document.getElementById("update-check-modal");
+  const btnCloseUpdateModal = document.getElementById("btn-close-update-modal");
+  const btnCancelUpdateModal = document.getElementById("btn-cancel-update-modal");
+  const btnExecUpdateModal = document.getElementById("btn-exec-update-modal");
+  const lblModalCurVer = document.getElementById("lbl-modal-cur-ver");
+  const lblModalLatestVer = document.getElementById("lbl-modal-latest-ver");
+  const lblUpdateModalMsg = document.getElementById("lbl-update-modal-msg");
+  const boxUpdateReleaseNotes = document.getElementById("box-update-release-notes");
+
+  // ヘルプ / 権利情報モーダル要素
+  const helpAboutModal = document.getElementById("help-about-modal");
+  const btnCloseHelpModal = document.getElementById("btn-close-help-modal");
+  const btnOkHelpModal = document.getElementById("btn-ok-help-modal");
+
+  async function openExternalUrl(url) {
+    try {
+      await fetch("/api/open_url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url })
+      });
+    } catch (_) {
+      window.open(url, "_blank");
+    }
+  }
+
+  async function executeSelfUpdate() {
+    if (!confirm("GitHub Releases から最新バージョンをダウンロードして更新しますか？")) return;
+    if (btnApplyUpdate) btnApplyUpdate.disabled = true;
+    if (btnExecUpdateModal) btnExecUpdateModal.disabled = true;
+    if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = "最新バイナリをダウンロードして適用しています...";
+    appendTerminalLog(el.behaviorTerminal, "[UPDATE] 最新バイナリをダウンロードして適用中...", "system-msg");
+    try {
+      const res = await fetch("/api/update/apply", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        appendTerminalLog(el.behaviorTerminal, `[UPDATE] ${data.message}`, "system-msg");
+        if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = data.message;
+        alert(data.message);
+      } else {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
+        if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = `エラー: ${data.message}`;
+        if (btnApplyUpdate) btnApplyUpdate.disabled = false;
+        if (btnExecUpdateModal) btnExecUpdateModal.disabled = false;
+      }
+    } catch (err) {
+      appendTerminalLog(el.behaviorTerminal, `[ERROR] アップデート適用エラー: ${err}`, "error-msg");
+      if (btnApplyUpdate) btnApplyUpdate.disabled = false;
+      if (btnExecUpdateModal) btnExecUpdateModal.disabled = false;
+    }
+  }
 
   async function checkAppUpdate(manual = false) {
+    if (manual && updateModal) {
+      if (lblModalLatestVer) lblModalLatestVer.textContent = "確認中...";
+      if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = "GitHub Releases に問い合わせています...";
+      if (boxUpdateReleaseNotes) boxUpdateReleaseNotes.style.display = "none";
+      if (btnExecUpdateModal) btnExecUpdateModal.style.display = "none";
+      updateModal.classList.add("active");
+    }
+
     try {
       const res = await fetch("/api/update/check");
       const data = await res.json();
-      if (lblAppVersion && data.current_version) {
-        lblAppVersion.textContent = `Altair Control v${data.current_version}`;
+      if (data.current_version) {
+        const vText = `v${data.current_version}`;
+        if (lblAppVersion) lblAppVersion.textContent = vText;
+        if (lblSidebarVersion) lblSidebarVersion.textContent = `Altair Control ${vText}`;
+        if (lblAboutVer) lblAboutVer.textContent = vText;
+        if (lblModalCurVer) lblModalCurVer.textContent = vText;
       }
+      if (lblModalLatestVer && data.latest_version) {
+        lblModalLatestVer.textContent = `v${data.latest_version}`;
+      }
+      if (lblUpdateModalMsg && data.message) {
+        lblUpdateModalMsg.textContent = data.message;
+      }
+      if (boxUpdateReleaseNotes) {
+        if (data.release_notes && data.release_notes.trim().length > 0) {
+          boxUpdateReleaseNotes.textContent = data.release_notes;
+          boxUpdateReleaseNotes.style.display = "block";
+        } else {
+          boxUpdateReleaseNotes.style.display = "none";
+        }
+      }
+
       if (data.update_available) {
         if (btnApplyUpdate) {
-          btnApplyUpdate.style.display = "inline-block";
+          btnApplyUpdate.style.display = "inline-flex";
           btnApplyUpdate.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> v${data.latest_version} へ更新`;
+        }
+        if (btnExecUpdateModal) {
+          btnExecUpdateModal.style.display = "inline-flex";
         }
         appendTerminalLog(el.behaviorTerminal, `[UPDATE] ${data.message}`, "system-msg");
       } else if (manual) {
         appendTerminalLog(el.behaviorTerminal, `[UPDATE] ${data.message}`, "system-msg");
       }
     } catch (err) {
+      if (lblUpdateModalMsg) {
+        lblUpdateModalMsg.textContent = `アップデート確認に失敗しました: ${err}`;
+      }
       if (manual) {
         appendTerminalLog(el.behaviorTerminal, `[ERROR] アップデート確認エラー: ${err}`, "error-msg");
       }
@@ -1480,27 +1743,78 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnCheckUpdate) {
     btnCheckUpdate.addEventListener("click", () => checkAppUpdate(true));
   }
-
   if (btnApplyUpdate) {
-    btnApplyUpdate.addEventListener("click", async () => {
-      if (!confirm("GitHub Releases から最新バージョンをダウンロードして更新しますか？")) return;
-      btnApplyUpdate.disabled = true;
-      appendTerminalLog(el.behaviorTerminal, "[UPDATE] 最新バイナリをダウンロードして適用中...", "system-msg");
-      try {
-        const res = await fetch("/api/update/apply", { method: "POST" });
-        const data = await res.json();
-        if (data.success) {
-          appendTerminalLog(el.behaviorTerminal, `[UPDATE] ${data.message}`, "system-msg");
-          alert(data.message);
-        } else {
-          appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
-          btnApplyUpdate.disabled = false;
-        }
-      } catch (err) {
-        appendTerminalLog(el.behaviorTerminal, `[ERROR] アップデート適用エラー: ${err}`, "error-msg");
-        btnApplyUpdate.disabled = false;
-      }
+    btnApplyUpdate.addEventListener("click", executeSelfUpdate);
+  }
+  if (btnExecUpdateModal) {
+    btnExecUpdateModal.addEventListener("click", executeSelfUpdate);
+  }
+  if (btnCloseUpdateModal && updateModal) {
+    btnCloseUpdateModal.addEventListener("click", () => updateModal.classList.remove("active"));
+  }
+  if (btnCancelUpdateModal && updateModal) {
+    btnCancelUpdateModal.addEventListener("click", () => updateModal.classList.remove("active"));
+  }
+
+  if (btnReportIssue) {
+    btnReportIssue.addEventListener("click", () => {
+      openExternalUrl("https://github.com/Altairu/Altair_module_system_control/issues/new");
     });
+  }
+
+  if (btnHelpInfo && helpAboutModal) {
+    btnHelpInfo.addEventListener("click", () => helpAboutModal.classList.add("active"));
+  }
+  if (btnCloseHelpModal && helpAboutModal) {
+    btnCloseHelpModal.addEventListener("click", () => helpAboutModal.classList.remove("active"));
+  }
+  if (btnOkHelpModal && helpAboutModal) {
+    btnOkHelpModal.addEventListener("click", () => helpAboutModal.classList.remove("active"));
+  }
+
+  // 上部メニューバー (ファイル / ヘルプ) ドロップダウン開閉とアクション
+  const menuDropdowns = document.querySelectorAll(".win-menu-dropdown");
+  menuDropdowns.forEach(dd => {
+    const trigger = dd.querySelector(".win-menu-trigger");
+    if (trigger) {
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const isOpen = dd.classList.contains("open");
+        menuDropdowns.forEach(d => d.classList.remove("open"));
+        if (!isOpen) dd.classList.add("open");
+      });
+    }
+  });
+  document.addEventListener("click", () => {
+    menuDropdowns.forEach(d => d.classList.remove("open"));
+  });
+
+  const menuImport = document.getElementById("menu-item-import-profile");
+  const menuExport = document.getElementById("menu-item-export-profile");
+  const menuReload = document.getElementById("menu-item-reload");
+  const menuCheckUpdate = document.getElementById("menu-item-check-update");
+  const menuReportIssue = document.getElementById("menu-item-report-issue");
+  const menuAbout = document.getElementById("menu-item-about");
+
+  if (menuImport && el.fileImportProfile) {
+    menuImport.addEventListener("click", () => el.fileImportProfile.click());
+  }
+  if (menuExport && el.btnExportProfile) {
+    menuExport.addEventListener("click", () => el.btnExportProfile.click());
+  }
+  if (menuReload) {
+    menuReload.addEventListener("click", () => window.location.reload());
+  }
+  if (menuCheckUpdate) {
+    menuCheckUpdate.addEventListener("click", () => checkAppUpdate(true));
+  }
+  if (menuReportIssue) {
+    menuReportIssue.addEventListener("click", () => {
+      openExternalUrl("https://github.com/Altairu/Altair_module_system_control/issues/new");
+    });
+  }
+  if (menuAbout && helpAboutModal) {
+    menuAbout.addEventListener("click", () => helpAboutModal.classList.add("active"));
   }
 
   checkAppUpdate(false);

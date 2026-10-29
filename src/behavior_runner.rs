@@ -96,6 +96,73 @@ impl BehaviorRunner {
         fs::read_to_string(&xml_path).unwrap_or_default()
     }
 
+    fn sanitize_py_filename(name: &str) -> Result<String, String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("ファイル名が空です。".to_string());
+        }
+        let mut safe = PathBuf::from(trimmed)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if safe.is_empty() || safe.contains("..") {
+            return Err("無効なファイル名です。".to_string());
+        }
+        if !safe.ends_with(".py") {
+            safe.push_str(".py");
+        }
+        Ok(safe)
+    }
+
+    pub fn read_behavior_file(&self, name: &str) -> Result<(String, String), String> {
+        let safe = Self::sanitize_py_filename(name)?;
+        let path = self.behaviors_dir.join(&safe);
+        if !path.exists() {
+            return Err(format!("ファイルが見つかりません: {}", safe));
+        }
+        let code =
+            fs::read_to_string(&path).map_err(|e| format!("ファイル読み込み失敗: {}", e))?;
+        Ok((safe, code))
+    }
+
+    pub fn save_behavior_file(&self, name: &str, code: &str) -> Result<String, String> {
+        let safe = Self::sanitize_py_filename(name)?;
+        let _ = fs::create_dir_all(&self.behaviors_dir);
+        let path = self.behaviors_dir.join(&safe);
+        fs::write(&path, code).map_err(|e| format!("ファイル保存失敗: {}", e))?;
+        Ok(safe)
+    }
+
+    pub fn create_behavior_file(&self, name: &str) -> Result<(String, String), String> {
+        let safe = Self::sanitize_py_filename(name)?;
+        let _ = fs::create_dir_all(&self.behaviors_dir);
+        let dst = self.behaviors_dir.join(&safe);
+        if dst.exists() {
+            return Err(format!("すでに同名のファイルが存在します: {}", safe));
+        }
+        let tpl_path = self.behaviors_dir.join("template_behavior.py");
+        let default_code = if tpl_path.exists() {
+            fs::read_to_string(&tpl_path).unwrap_or_default()
+        } else {
+            "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n\nimport rclpy\nfrom altair_core.base_behavior import AltairBehavior\n\nclass CustomBehavior(AltairBehavior):\n    def on_init(self):\n        self.get_logger().info('CustomBehavior initialized')\n\n    def loop(self):\n        pass\n\ndef main(args=None):\n    rclpy.init(args=args)\n    b = CustomBehavior('custom_behavior')\n    b.run(rate_hz=100.0)\n\nif __name__ == '__main__':\n    main()\n".to_string()
+        };
+        fs::write(&dst, &default_code).map_err(|e| format!("新規作成失敗: {}", e))?;
+        Ok((safe, default_code))
+    }
+
+    pub fn delete_behavior_file(&self, name: &str) -> Result<String, String> {
+        let safe = Self::sanitize_py_filename(name)?;
+        if safe == "template_behavior.py" {
+            return Err("テンプレートファイル (template_behavior.py) は削除できません。".to_string());
+        }
+        let path = self.behaviors_dir.join(&safe);
+        if !path.exists() {
+            return Err(format!("削除対象が見つかりません: {}", safe));
+        }
+        fs::remove_file(&path).map_err(|e| format!("ファイル削除失敗: {}", e))?;
+        Ok(safe)
+    }
+
     pub fn start_behavior(&self, script_name: &str) -> Result<String, String> {
         self.stop_behavior();
 

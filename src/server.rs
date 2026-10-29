@@ -206,6 +206,10 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/behavior/stop", post(api_behavior_stop))
         .route("/api/behavior/save_blockly", post(api_save_blockly))
         .route("/api/behavior/list", get(api_behavior_list))
+        .route("/api/behavior/read", get(api_behavior_read))
+        .route("/api/behavior/save", post(api_behavior_save))
+        .route("/api/behavior/create", post(api_behavior_create))
+        .route("/api/behavior/delete", post(api_behavior_delete))
         .route(
             "/api/behavior/get_blockly_workspace",
             get(api_get_blockly_workspace),
@@ -218,6 +222,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/config/update", post(api_update_config))
         .route("/api/update/check", get(api_update_check))
         .route("/api/update/apply", post(api_update_apply))
+        .route("/api/open_url", post(api_open_url))
         .route("/ws", get(ws_handler))
         .nest_service("/css", ServeDir::new(project_root.join("css")))
         .nest_service("/js", ServeDir::new(project_root.join("js")))
@@ -396,6 +401,96 @@ async fn api_behavior_list(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+async fn api_behavior_read(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let name = params.get("name").cloned().unwrap_or_default();
+    match state.behavior_runner.read_behavior_file(&name) {
+        Ok((fname, code)) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "name": fname, "code": code })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "message": err })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct BehaviorSaveReq {
+    name: String,
+    #[serde(default)]
+    code: String,
+}
+
+async fn api_behavior_save(
+    State(state): State<AppState>,
+    Json(req): Json<BehaviorSaveReq>,
+) -> impl IntoResponse {
+    match state.behavior_runner.save_behavior_file(&req.name, &req.code) {
+        Ok(fname) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "name": fname,
+                "message": format!("'{}' を保存しました。", fname)
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "message": err })),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct BehaviorNameReq {
+    name: String,
+}
+
+async fn api_behavior_create(
+    State(state): State<AppState>,
+    Json(req): Json<BehaviorNameReq>,
+) -> impl IntoResponse {
+    match state.behavior_runner.create_behavior_file(&req.name) {
+        Ok((fname, code)) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "name": fname,
+                "code": code,
+                "message": format!("新規スクリプト '{}' を作成しました。", fname)
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "message": err })),
+        ),
+    }
+}
+
+async fn api_behavior_delete(
+    State(state): State<AppState>,
+    Json(req): Json<BehaviorNameReq>,
+) -> impl IntoResponse {
+    match state.behavior_runner.delete_behavior_file(&req.name) {
+        Ok(fname) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "name": fname,
+                "message": format!("スクリプト '{}' を削除しました。", fname)
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "message": err })),
+        ),
+    }
+}
+
 async fn api_get_blockly_workspace(State(state): State<AppState>) -> impl IntoResponse {
     let xml = state.behavior_runner.get_blockly_workspace();
     Json(json!({ "success": true, "xml": xml }))
@@ -560,6 +655,35 @@ async fn api_update_apply() -> impl IntoResponse {
         Ok(msg) => Json(json!({ "success": true, "message": msg })),
         Err(err) => Json(json!({ "success": false, "message": err })),
     }
+}
+
+#[derive(Deserialize)]
+struct OpenUrlReq {
+    url: String,
+}
+
+async fn api_open_url(Json(req): Json<OpenUrlReq>) -> impl IntoResponse {
+    let url = req.url.trim().to_string();
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Json(json!({ "success": false, "message": "無効なURLです。" }));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+    }
+
+    Json(json!({ "success": true }))
 }
 
 async fn ws_handler(
