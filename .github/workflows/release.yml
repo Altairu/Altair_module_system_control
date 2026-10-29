@@ -97,6 +97,7 @@ jobs:
           $pkgDir = "altair_release_pkg"
           New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
 
+          Copy-Item "target/release/altair_module_system_control.exe" -Destination ".\altair_module_system_control.exe"
           Copy-Item "target/release/altair_module_system_control.exe" -Destination "$pkgDir/"
           Copy-Item "index.html" -Destination "$pkgDir/"
           Copy-Item "README.md" -Destination "$pkgDir/"
@@ -112,6 +113,22 @@ jobs:
           # self_update クレートが x86_64-pc-windows-msvc ターゲットの zip アセットを自動検出できるよう命名
           Compress-Archive -Path "$pkgDir/*" -DestinationPath "altair_module_system_control-$tag-x86_64-pc-windows-msvc.zip" -Force
 
+      - name: Build Windows Installer with Inno Setup
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $isccPath)) {
+              $isccPath = "C:\Program Files\Inno Setup 6\ISCC.exe"
+            }
+          } else {
+            $isccPath = $iscc.Source
+          }
+          Write-Host "Using Inno Setup compiler: $isccPath"
+          & $isccPath /DMyAppVersion="$ver" "installer.iss"
+
       - name: Create GitHub Release and Upload Binaries
         uses: softprops/action-gh-release@v2
         with:
@@ -120,4 +137,5 @@ jobs:
           files: |
             altair_module_system_control-*-x86_64-pc-windows-msvc.zip
             target/release/altair_module_system_control.exe
+            altair_module_system_control_setup.exe
           generate_release_notes: true
