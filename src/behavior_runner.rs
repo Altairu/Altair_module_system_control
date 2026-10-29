@@ -120,6 +120,7 @@ impl BehaviorRunner {
         Ok(clean)
     }
 
+    #[allow(dead_code)]
     pub fn read_behavior_file(&self, name: &str) -> Result<(String, String), String> {
         let safe = Self::sanitize_py_filename(name)?;
         let path = self.behaviors_dir.join(&safe);
@@ -131,6 +132,7 @@ impl BehaviorRunner {
         Ok((safe, code))
     }
 
+    #[allow(dead_code)]
     pub fn save_behavior_file(&self, name: &str, code: &str) -> Result<String, String> {
         let safe = Self::sanitize_py_filename(name)?;
         let _ = fs::create_dir_all(&self.behaviors_dir);
