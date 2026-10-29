@@ -1,378 +1,305 @@
-/**
- * gamepad.js
- * ゲームコントローラー入力とモジュール制御のマッピング
- */
+/* ==========================================================================
+   Altair Web Controller v2 - ゲームコントローラー変数化 ＆ モニター JavaScript
+   機能: Web Gamepad API 連携, 入力周期送信 (20Hz), リアルタイムインプットモニター
+   ========================================================================== */
 
-const gamepad = {
-    loopId: null,
-    gamepadIndex: null,
+document.addEventListener("DOMContentLoaded", () => {
+  // コントローラ状態管理
+  const state = {
+    gamepadIdx: null,
+    intervalId: null,
     prevButtons: [],
-    prevAxes: [],
-    axisThreshold: 0.5,
+    axesCount: 4,
+    buttonsCount: 16
+  };
 
-    init: function() {
-        window.addEventListener("gamepadconnected", (e) => {
-            ui.log("Gamepad", `Connected: ${e.gamepad.id}`, "info");
-            this.gamepadIndex = e.gamepad.index;
-            this.updateStatus(true, e.gamepad.id);
-            if (!this.loopId) {
-                this.loopId = requestAnimationFrame(this.poll.bind(this));
-            }
-        });
+  const el = {
+    indicator: document.getElementById("gamepad-status-indicator"),
+    mappingsBody: document.getElementById("gamepad-mappings-body"),
+    btnAddMapping: document.getElementById("btn-add-mapping"),
+    terminal: document.getElementById("behavior-terminal")
+  };
 
-        window.addEventListener("gamepaddisconnected", (e) => {
-            ui.log("Gamepad", `Disconnected: ${e.gamepad.id}`, "warning");
-            if (this.gamepadIndex === e.gamepad.index) {
-                this.gamepadIndex = null;
-                this.updateStatus(false, "");
-            }
-        });
+  // 直接マッピング追加ボタンなどは非表示またはラベル変更
+  if (el.btnAddMapping) {
+    el.btnAddMapping.style.display = "none"; // マッピング不要になったため非表示
+  }
 
-        // Initialize UI
-        this.renderMappings();
+  // --- 1. Gamepad API イベントハンドリング ---
+  window.addEventListener("gamepadconnected", (e) => {
+    console.log("コントローラーが接続されました:", e.gamepad.id);
+    state.gamepadIdx = e.gamepad.index;
+    
+    // UI表示の更新
+    const icon = el.indicator.querySelector(".gamepad-icon");
+    if (icon) icon.className = "fa-solid fa-gamepad gamepad-icon connected";
+    
+    const text = el.indicator.querySelector(".ctrl-status-text");
+    if (text) text.textContent = `Connected: ${e.gamepad.id.substring(0, 24)}...`;
 
-        // Start polling loop unconditionally
-        this.loopId = requestAnimationFrame(this.poll.bind(this));
-    },
+    appendLog(`[SYSTEM] コントローラーが接続されました: ${e.gamepad.id}`, "system-msg");
 
-    updateStatus: function(connected, name) {
-        const statusEl = document.getElementById('gamepad-status');
-        if (!statusEl) return;
-        if (connected) {
-            statusEl.className = 'status-indicator online';
-            statusEl.innerText = `Connected: ${name}`;
-        } else {
-            statusEl.className = 'status-indicator offline';
-            statusEl.innerText = 'Press any button on controller';
-            document.getElementById('gamepad-test-output').innerText = 'Waiting for input...';
-        }
-    },
+    // ダッシュボード表示の更新
+    const dashDisconnected = document.getElementById("dashboard-gamepad-disconnected");
+    const dashConnected = document.getElementById("dashboard-gamepad-connected");
+    if (dashDisconnected) dashDisconnected.style.display = "none";
+    if (dashConnected) dashConnected.style.display = "flex";
 
-    poll: function() {
-        // もし gamepadIndex が未設定の場合、接続済みのゲームパッドを探す
-        if (this.gamepadIndex === null) {
-            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-            for (let i = 0; i < pads.length; i++) {
-                if (pads[i]) {
-                    this.gamepadIndex = pads[i].index;
-                    this.updateStatus(true, pads[i].id);
-                    ui.log("Gamepad", `Found Connected: ${pads[i].id}`, "info");
-                    break;
-                }
-            }
-        }
+    // 周期（20Hz = 50ms）で WebSocket 送信＆モニター描画を行うタイマーを開始
+    startGamepadPolling();
+  });
 
-        if (this.gamepadIndex === null) {
-            this.loopId = requestAnimationFrame(this.poll.bind(this));
-            return;
-        }
+  window.addEventListener("gamepaddisconnected", (e) => {
+    if (state.gamepadIdx === e.gamepad.index) {
+      console.log("コントローラーが切断されました。");
+      state.gamepadIdx = null;
+      
+      // UIの初期化
+      const icon = el.indicator.querySelector(".gamepad-icon");
+      if (icon) icon.className = "fa-solid fa-gamepad gamepad-icon disconnected";
+      
+      const text = el.indicator.querySelector(".ctrl-status-text");
+      if (text) text.textContent = "Not Connected (コントローラー未接続)";
+      
+      appendLog("[SYSTEM] コントローラーが切断されました。", "warning-msg");
 
-        const pad = navigator.getGamepads()[this.gamepadIndex];
-        if (!pad) {
-            this.gamepadIndex = null;
-            this.updateStatus(false, "");
-            this.loopId = requestAnimationFrame(this.poll.bind(this));
-            return;
-        }
+      // ダッシュボード表示の更新
+      const dashDisconnected = document.getElementById("dashboard-gamepad-disconnected");
+      const dashConnected = document.getElementById("dashboard-gamepad-connected");
+      if (dashDisconnected) dashDisconnected.style.display = "block";
+      if (dashConnected) dashConnected.style.display = "none";
 
-        let testStr = "";
-        
-        // Buttons
-        for (let i = 0; i < pad.buttons.length; i++) {
-            const isPressed = pad.buttons[i].pressed;
-            const wasPressed = this.prevButtons[i] || false;
-            
-            if (isPressed) {
-                testStr += `Button ${i} PRESSED\n`;
-            }
-
-            if (isPressed !== wasPressed) {
-                this.handleInputEvent('button', i, isPressed, pad.buttons[i].value);
-            }
-            this.prevButtons[i] = isPressed;
-        }
-
-        // Axes
-        for (let i = 0; i < pad.axes.length; i++) {
-            const val = pad.axes[i];
-            const prevVal = this.prevAxes[i] || 0;
-            
-            if (Math.abs(val) > 0.1) {
-                testStr += `Axis ${i}: ${val.toFixed(2)}\n`;
-            }
-
-            // Positive direction check
-            const isPos = val > this.axisThreshold;
-            const wasPos = prevVal > this.axisThreshold;
-            if (isPos !== wasPos) {
-                this.handleInputEvent('axis', i, isPos, val, 1);
-            }
-
-            // Negative direction check
-            const isNeg = val < -this.axisThreshold;
-            const wasNeg = prevVal < -this.axisThreshold;
-            if (isNeg !== wasNeg) {
-                this.handleInputEvent('axis', i, isNeg, val, -1);
-            }
-
-            this.prevAxes[i] = val;
-        }
-
-        const testEl = document.getElementById('gamepad-test-output');
-        if (testEl) {
-            testEl.innerText = testStr || 'Waiting for input...';
-        }
-
-        this.loopId = requestAnimationFrame(this.poll.bind(this));
-    },
-
-    handleInputEvent: function(inputType, inputIndex, isPressed, rawValue, axisDir = 1) {
-        if (!window.altairState.gamepadMappings) return;
-
-        window.altairState.gamepadMappings.forEach(map => {
-            if (map.inputType === inputType && map.inputIndex === inputIndex) {
-                if (inputType === 'axis' && map.axisDir !== axisDir) {
-                    return; // Ignore if axis direction doesn't match
-                }
-
-                this.executeAction(map, isPressed, rawValue);
-            }
-        });
-    },
-
-    executeAction: function(map, isPressed, rawValue) {
-        const mod = window.altairState.modulesById[map.moduleId];
-        if (!mod) return;
-
-        // 電磁弁 トグル (押した瞬間のみ)
-        if (map.action === 'solenoid_toggle' && isPressed) {
-            ui.toggleSolenoidValve(mod.id, map.valveIdx);
-        }
-        // 電磁弁 モメンタリ (押してる間ON、離すとOFF)
-        else if (map.action === 'solenoid_momentary') {
-            ui.updateSolenoidValve(mod.id, map.valveIdx, isPressed);
-        }
-        // 目標値 トグル (押した瞬間のみ)
-        else if (map.action === 'target_toggle' && isPressed) {
-            let current = this.getCurrentTarget(mod, map);
-            // 値が0ならparamValへ、そうでなければ0へ
-            let nextVal = (current === 0) ? map.paramVal : 0;
-            this.setTarget(mod, map, nextVal);
-        }
-        // 目標値 モメンタリ (押してる間paramVal、離すと0)
-        else if (map.action === 'target_momentary') {
-            let nextVal = isPressed ? map.paramVal : 0;
-            this.setTarget(mod, map, nextVal);
-        }
-        // 目標値 加算 (押した瞬間のみ)
-        else if (map.action === 'target_add' && isPressed) {
-            let current = this.getCurrentTarget(mod, map);
-            this.setTarget(mod, map, current + map.paramVal);
-        }
-        // 目標値 減算 (押した瞬間のみ)
-        else if (map.action === 'target_sub' && isPressed) {
-            let current = this.getCurrentTarget(mod, map);
-            this.setTarget(mod, map, current - map.paramVal);
-        }
-    },
-
-    getCurrentTarget: function(mod, map) {
-        if (mod.type === 'mdd') {
-            return mod.motors[map.motorIdx].target;
-        } else if (mod.type === 'servo') {
-            return mod.ch[map.chIdx];
-        }
-        return 0;
-    },
-
-    setTarget: function(mod, map, val) {
-        if (mod.type === 'mdd') {
-            ui.updateMddTarget(mod.id, map.motorIdx, val);
-        } else if (mod.type === 'servo') {
-            ui.updateServoTarget(mod.id, map.chIdx, val);
-        }
-        storage.saveConfig();
-    },
-
-    // --- UI Methods ---
-    showAddMappingModal: function() {
-        const modSelect = document.getElementById('modal-map-module');
-        modSelect.innerHTML = '';
-        if (window.altairState.modules.length === 0) {
-            alert("Please add a module first.");
-            return;
-        }
-
-        window.altairState.modules.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.id;
-            opt.innerText = `${m.name} (${m.type.toUpperCase()})`;
-            modSelect.appendChild(opt);
-        });
-
-        this.updateModalOptions();
-        document.getElementById('add-mapping-modal').classList.remove('hidden');
-    },
-
-    hideAddMappingModal: function() {
-        document.getElementById('add-mapping-modal').classList.add('hidden');
-    },
-
-    updateModalOptions: function() {
-        const inputType = document.getElementById('modal-map-input-type').value;
-        const modId = document.getElementById('modal-map-module').value;
-        
-        document.getElementById('axis-dir-group').style.display = (inputType === 'axis') ? 'block' : 'none';
-
-        const mod = window.altairState.modulesById[modId];
-        if (!mod) return;
-
-        const actionSelect = document.getElementById('modal-map-action');
-        const currentAction = actionSelect.value;
-        actionSelect.innerHTML = '';
-
-        if (mod.type === 'solenoid') {
-            actionSelect.innerHTML += `<option value="solenoid_toggle">Valve Toggle (ON/OFF)</option>`;
-            actionSelect.innerHTML += `<option value="solenoid_momentary">Valve Momentary (While Pressed)</option>`;
-        } else if (mod.type === 'mdd' || mod.type === 'servo') {
-            actionSelect.innerHTML += `<option value="target_toggle">Target Toggle (0 <-> Val)</option>`;
-            actionSelect.innerHTML += `<option value="target_momentary">Target Momentary (While Pressed)</option>`;
-            actionSelect.innerHTML += `<option value="target_add">Target Add (+Val)</option>`;
-            actionSelect.innerHTML += `<option value="target_sub">Target Subtract (-Val)</option>`;
-        }
-
-        // Restore action selection if it still exists
-        if (Array.from(actionSelect.options).some(o => o.value === currentAction)) {
-            actionSelect.value = currentAction;
-        }
-
-        this.updateParamOptions(mod);
-    },
-
-    updateParamOptions: function(mod) {
-        const paramGroup = document.getElementById('modal-map-param-group');
-        const action = document.getElementById('modal-map-action').value;
-        paramGroup.innerHTML = '';
-
-        if (mod.type === 'solenoid') {
-            let html = `<label>Target Valve (1-12)</label><select id="modal-map-param-ch">`;
-            for (let i = 0; i < 12; i++) html += `<option value="${i}">Valve ${i+1}</option>`;
-            html += `</select>`;
-            paramGroup.innerHTML = html;
-        } 
-        else if (mod.type === 'mdd') {
-            let html = `<label>Target Motor (M1-M4)</label><select id="modal-map-param-ch">`;
-            for (let i = 0; i < 4; i++) html += `<option value="${i}">Motor ${i+1}</option>`;
-            html += `</select>`;
-            
-            if (action !== 'solenoid_toggle' && action !== 'solenoid_momentary') {
-                html += `<label style="margin-top:10px;">Value (Toggle Val / Step Val)</label>
-                         <input type="number" id="modal-map-param-val" value="100">`;
-            }
-            paramGroup.innerHTML = html;
-        }
-        else if (mod.type === 'servo') {
-            let html = `<label>Target Channel (CH1-CH6)</label><select id="modal-map-param-ch">`;
-            for (let i = 0; i < 6; i++) html += `<option value="${i}">Channel ${i+1}</option>`;
-            html += `</select>`;
-
-            if (action !== 'solenoid_toggle' && action !== 'solenoid_momentary') {
-                html += `<label style="margin-top:10px;">Value (Toggle Val / Step Val)</label>
-                         <input type="number" id="modal-map-param-val" value="90">`;
-            }
-            paramGroup.innerHTML = html;
-        }
-    },
-
-    confirmAddMapping: function() {
-        const inputType = document.getElementById('modal-map-input-type').value;
-        const inputIndex = parseInt(document.getElementById('modal-map-input-index').value);
-        const axisDir = parseInt(document.getElementById('modal-map-axis-dir').value);
-        const modId = document.getElementById('modal-map-module').value;
-        const action = document.getElementById('modal-map-action').value;
-        
-        const chSelect = document.getElementById('modal-map-param-ch');
-        const valInput = document.getElementById('modal-map-param-val');
-
-        const map = {
-            id: 'map_' + Date.now(),
-            inputType: inputType,
-            inputIndex: inputIndex,
-            axisDir: axisDir,
-            moduleId: modId,
-            action: action,
-            valveIdx: chSelect ? parseInt(chSelect.value) : 0,
-            motorIdx: chSelect ? parseInt(chSelect.value) : 0,
-            chIdx: chSelect ? parseInt(chSelect.value) : 0,
-            paramVal: valInput ? parseFloat(valInput.value) : 0
-        };
-
-        if (!window.altairState.gamepadMappings) {
-            window.altairState.gamepadMappings = [];
-        }
-        window.altairState.gamepadMappings.push(map);
-        
-        this.renderMappings();
-        this.hideAddMappingModal();
-        storage.saveConfig();
-        ui.log("Gamepad", `Mapping added: ${inputType} ${inputIndex} -> ${action}`, "success");
-    },
-
-    deleteMapping: function(id) {
-        window.altairState.gamepadMappings = window.altairState.gamepadMappings.filter(m => m.id !== id);
-        this.renderMappings();
-        storage.saveConfig();
-        ui.log("Gamepad", "Mapping deleted.", "info");
-    },
-
-    renderMappings: function() {
-        const list = document.getElementById('mapping-list');
-        if (!list) return;
-        list.innerHTML = '';
-
-        if (!window.altairState.gamepadMappings || window.altairState.gamepadMappings.length === 0) {
-            list.innerHTML = `
-                <div class="empty-state">
-                    <i class="fa-solid fa-link-slash"></i>
-                    <p>No mappings defined yet.</p>
-                </div>`;
-            return;
-        }
-
-        window.altairState.gamepadMappings.forEach(map => {
-            const mod = window.altairState.modulesById[map.moduleId];
-            const modName = mod ? mod.name : 'Deleted Module';
-
-            let inputStr = `${map.inputType === 'button' ? 'BTN' : 'AXIS'} ${map.inputIndex}`;
-            if (map.inputType === 'axis') {
-                inputStr += map.axisDir > 0 ? ' (+)' : ' (-)';
-            }
-
-            let descStr = map.action;
-            if (map.action.startsWith('solenoid')) {
-                descStr = `${map.action.includes('toggle') ? 'Toggle' : 'Momentary'} V${map.valveIdx + 1}`;
-            } else if (map.action.startsWith('target')) {
-                let tgt = mod?.type === 'mdd' ? `M${map.motorIdx + 1}` : `CH${map.chIdx + 1}`;
-                descStr = `${map.action.split('_')[1].toUpperCase()} ${tgt} (Val: ${map.paramVal})`;
-            }
-
-            const item = document.createElement('div');
-            item.className = 'mapping-item';
-            item.innerHTML = `
-                <div class="mapping-info">
-                    <div style="display:flex; align-items:center;">
-                        <span class="map-input-badge">${inputStr}</span>
-                        <span class="map-action-desc">${descStr}</span>
-                    </div>
-                    <span class="map-module-desc"><i class="fa-solid fa-microchip"></i> ${modName}</span>
-                </div>
-                <div class="mapping-delete" onclick="gamepad.deleteMapping('${map.id}')">
-                    <i class="fa-solid fa-trash-can"></i>
-                </div>
-            `;
-            list.appendChild(item);
-        });
+      // タイマー停止
+      stopGamepadPolling();
+      renderDisconnectedMonitor();
     }
-};
+  });
 
-window.gamepad = gamepad;
+  // --- 2. リアルタイムモニター表示の描画 ---
+  function initMonitorTable() {
+    if (!el.mappingsBody) return;
+    el.mappingsBody.innerHTML = "";
+    
+    // アナログスティック軸モニター (4ch分)
+    for (let i = 0; i < state.axesCount; i++) {
+      let label = "";
+      if (i === 0) label = "L-Stick 左右 (X)";
+      else if (i === 1) label = "L-Stick 上下 (Y)";
+      else if (i === 2) label = "R-Stick 左右 (X)";
+      else if (i === 3) label = "R-Stick 上下 (Y)";
+      else label = `Axis ${i}`;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><i class="fa-solid fa-arrows-up-down-left-right"></i> ${label}</td>
+        <td><code>self.gamepad.get_axis(${i})</code></td>
+        <td colspan="3">
+          <div class="progress-bar-container" style="background: #e8eaed; border-radius: 10px; height: 16px; width: 100%; position: relative; overflow: hidden;">
+            <div id="monitor-axis-${i}" class="progress-bar" style="background: var(--color-primary); height: 100%; width: 50%; margin-left: 0; transition: width 0.05s ease; border-radius: 10px;"></div>
+            <span id="monitor-axis-val-${i}" style="position: absolute; width: 100%; text-align: center; top: 0; font-size: 11px; font-weight: 700; color: #202124; line-height: 16px;">0.00</span>
+          </div>
+        </td>
+      `;
+      el.mappingsBody.appendChild(tr);
+    }
+
+    // 主要ボタンモニター (全16ch分 - 十字キー含む)
+    const btnLabels = [
+      "A / ×", "B / ○", "X / □", "Y / △",
+      "L1", "R1", "L2", "R2",
+      "Select / Share", "Start / Options",
+      "L-Stick クリック", "R-Stick クリック",
+      "D-Pad ↑", "D-Pad ↓", "D-Pad ←", "D-Pad →"
+    ];
+    for (let i = 0; i < btnLabels.length; i++) {
+      const isDpad = i >= 12;
+      const icon = isDpad ? "fa-solid fa-circle-arrow-" + ["up","down","left","right"][i-12] : "fa-solid fa-circle-dot";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><i class="${icon}"></i> ${btnLabels[i]}</td>
+        <td><code>self.gamepad.get_button(${i})</code></td>
+        <td colspan="3">
+          <span id="monitor-btn-${i}" class="badge badge-secondary">OFF</span>
+        </td>
+      `;
+      el.mappingsBody.appendChild(tr);
+    }
+  }
+
+  function renderDisconnectedMonitor() {
+    if (!el.mappingsBody) return;
+    el.mappingsBody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px 0;">
+          <i class="fa-solid fa-gamepad" style="font-size: 32px; margin-bottom: 10px; display: block; color: var(--text-muted);"></i>
+          コントローラーが接続されていません。ボタンやスティックの値を検出すると、ここにリアルタイムに値と変数名（Blocklyやコードで参照可能）が表示されます。
+        </td>
+      </tr>`;
+  }
+
+  // --- 3. コントローラー状態のサンプリング ＆ 送信タイマー ---
+  function startGamepadPolling() {
+    stopGamepadPolling();
+    initMonitorTable();
+
+    // ダッシュボード表示を接続状態に更新（念のため）
+    const dashDisconnected = document.getElementById("dashboard-gamepad-disconnected");
+    const dashConnected = document.getElementById("dashboard-gamepad-connected");
+    if (dashDisconnected) dashDisconnected.style.display = "none";
+    if (dashConnected) dashConnected.style.display = "flex";
+
+    state.intervalId = setInterval(pollAndSendGamepad, 50); // 20Hz
+  }
+
+  function stopGamepadPolling() {
+    if (state.intervalId) {
+      clearInterval(state.intervalId);
+      state.intervalId = null;
+    }
+  }
+
+  function pollAndSendGamepad() {
+    if (state.gamepadIdx === null) return;
+
+    const gamepads = navigator.getGamepads();
+    const gp = gamepads[state.gamepadIdx];
+    if (!gp) return;
+
+    // デッドバンド (遊び) を適用したスティック値の取得
+    const DEADBAND = 0.05;
+    const axesData = gp.axes.map(v => {
+      let val = v;
+      if (Math.abs(val) < DEADBAND) val = 0.0;
+      return parseFloat(val.toFixed(3));
+    });
+
+    // ボタンの押し下げ状態の取得
+    const buttonsData = gp.buttons.map(b => b.pressed);
+
+    // WebSocket経由で操縦PC(ROS2ノード)へ送信
+    const mainWs = window.appWs || window.parent.appWs;
+    if (mainWs && mainWs.readyState === WebSocket.OPEN) {
+      mainWs.send(JSON.stringify({
+        type: "gamepad_state",
+        axes: axesData,
+        buttons: buttonsData
+      }));
+    }
+
+    // 画面モニターの更新
+    updateMonitorUI(axesData, buttonsData);
+  }
+
+  // リアルタイムインプットモニターの描画更新
+  function updateMonitorUI(axes, buttons) {
+    // 1. スティック軸の描画更新
+    for (let i = 0; i < state.axesCount; i++) {
+      const bar = document.getElementById(`monitor-axis-${i}`);
+      const text = document.getElementById(`monitor-axis-val-${i}`);
+      if (bar && text && i < axes.length) {
+        const val = axes[i];
+        // -1.0〜1.0 の値を progress のパーセンテージ幅に変換
+        // -1.0 ➔ 0%、0 ➔ 50%、1.0 ➔ 100%
+        const percent = ((val + 1.0) / 2.0) * 100;
+        bar.style.width = `${percent}%`;
+        text.textContent = val.toFixed(2);
+        
+        // ニュートラル(0)からの離脱によって色を変える
+        if (Math.abs(val) > 0.1) {
+          bar.style.backgroundColor = "var(--color-primary)";
+        } else {
+          bar.style.backgroundColor = "#bdc1c6";
+        }
+      }
+    }
+
+    // 2. ボタンの描画更新（全16ボタン: A/B/X/Y/L1/R1/L2/R2/Share/Start/L3/R3/D-Pad4方向）
+    for (let i = 0; i < 16; i++) {
+      const btnBadge = document.getElementById(`monitor-btn-${i}`);
+      if (btnBadge && i < buttons.length) {
+        const isPressed = buttons[i];
+        if (isPressed) {
+          btnBadge.textContent = "ON";
+          btnBadge.className = "badge badge-success";
+          btnBadge.style.boxShadow = "0 2px 4px rgba(19, 115, 51, 0.3)";
+        } else {
+          btnBadge.textContent = "OFF";
+          btnBadge.className = "badge badge-secondary";
+          btnBadge.style.boxShadow = "none";
+        }
+      }
+    }
+
+    // 3. Dashboard用 Gamepad Monitor の描画更新
+    if (axes.length >= 4) {
+      const lx = axes[0];
+      const ly = axes[1];
+      const rx = axes[2];
+      const ry = axes[3];
+
+      // L-Stickテキストとバー
+      const lblLStick = document.getElementById("lbl-dash-lstick");
+      if (lblLStick) lblLStick.textContent = `X: ${lx.toFixed(2)} | Y: ${ly.toFixed(2)}`;
+
+      const barLx = document.getElementById("bar-dash-lx");
+      if (barLx) {
+        const percentLx = ((lx + 1.0) / 2.0) * 100;
+        barLx.style.width = `${percentLx}%`;
+        barLx.style.backgroundColor = Math.abs(lx) > 0.1 ? "var(--color-primary)" : "#bdc1c6";
+      }
+
+      const barLy = document.getElementById("bar-dash-ly");
+      if (barLy) {
+        const percentLy = ((ly + 1.0) / 2.0) * 100;
+        barLy.style.width = `${percentLy}%`;
+        barLy.style.backgroundColor = Math.abs(ly) > 0.1 ? "var(--color-primary)" : "#bdc1c6";
+      }
+
+      // R-Stickテキストとバー
+      const lblRStick = document.getElementById("lbl-dash-rstick");
+      if (lblRStick) lblRStick.textContent = `X: ${rx.toFixed(2)} | Y: ${ry.toFixed(2)}`;
+
+      const barRx = document.getElementById("bar-dash-rx");
+      if (barRx) {
+        const percentRx = ((rx + 1.0) / 2.0) * 100;
+        barRx.style.width = `${percentRx}%`;
+        barRx.style.backgroundColor = Math.abs(rx) > 0.1 ? "var(--color-primary)" : "#bdc1c6";
+      }
+
+      const barRy = document.getElementById("bar-dash-ry");
+      if (barRy) {
+        const percentRy = ((ry + 1.0) / 2.0) * 100;
+        barRy.style.width = `${percentRy}%`;
+        barRy.style.backgroundColor = Math.abs(ry) > 0.1 ? "var(--color-primary)" : "#bdc1c6";
+      }
+    }
+
+    // Dashboard用ボタンの描画更新（A/B/X/Y/L1/R1/L2/R2 + 十字キー4方向）
+    for (let i = 0; i < 12; i++) {
+      const btnDash = document.getElementById(`btn-dash-${i}`);
+      if (btnDash && i < buttons.length) {
+        const isPressed = buttons[i];
+        if (isPressed) {
+          btnDash.className = "badge badge-success";
+          btnDash.style.boxShadow = "0 2px 4px rgba(19, 115, 51, 0.3)";
+        } else {
+          btnDash.className = "badge badge-secondary";
+          btnDash.style.boxShadow = "none";
+        }
+      }
+    }
+  }
+
+  function appendLog(text, className = "") {
+    if (el.terminal) {
+      const line = document.createElement("div");
+      line.className = `terminal-line ${className}`;
+      line.textContent = `[CONTROLLER] ${text}`;
+      el.terminal.appendChild(line);
+      el.terminal.scrollTop = el.terminal.scrollHeight;
+    }
+  }
+
+  // 初期化時の描画
+  renderDisconnectedMonitor();
+});

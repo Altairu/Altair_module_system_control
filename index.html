@@ -1,314 +1,515 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Altair Web Controller</title>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <!-- Blockly -->
-    <script src="https://unpkg.com/blockly/blockly.min.js"></script>
-    <script src="https://unpkg.com/blockly/blocks_compressed.js"></script>
-    <script src="https://unpkg.com/blockly/javascript_compressed.js"></script>
-    <script src="https://unpkg.com/blockly/msg/ja.js"></script>
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Altair Web Controller v2</title>
+  <!-- Google Fonts & FontAwesome -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="/css/styles.css">
+
+  <!-- Google Blockly CDN (最新の安定動作バージョン) -->
+  <script src="https://unpkg.com/blockly/blockly.min.js"></script>
+  <script src="https://unpkg.com/blockly/python_compressed.js"></script>
+  <script src="https://unpkg.com/blockly/msg/ja.js"></script>
 </head>
+
 <body>
-    <!-- サイドバーオーバーレイ（モバイル用） -->
-    <div id="sidebar-overlay"></div>
 
-    <!-- ハンバーガーボタン（モバイル用） -->
-    <button id="btn-hamburger" aria-label="メニューを開く" title="メニュー">
-        <i class="fa-solid fa-bars"></i>
-    </button>
+  <!-- Googleスタイルのクリーン背景デコレーション（柔らかい薄色の変化） -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
 
-    <!-- インポート用の隠しファイル入力 -->
-    <input type="file" id="import-config-input" accept=".json" style="display:none;">
+  <div class="app-container">
 
-    <div id="app-container">
-        <!-- サイドバー -->
-        <aside class="sidebar glass-panel">
-            <div class="sidebar-header">
-                <h2><i class="fa-solid fa-satellite-dish"></i> Altair</h2>
-                <p>Web Controller</p>
+    <!-- サイドバー / ナビゲーション -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <i class="fa-solid fa-compass logo-icon"></i>
+        <span>ALTAIR</span>
+      </div>
+
+      <nav class="sidebar-menu">
+        <a href="#" class="menu-item active" data-target="view-dashboard">
+          <i class="fa-solid fa-gauge-high"></i> Dashboard
+        </a>
+        <a href="#" class="menu-item" data-target="view-profiles">
+          <i class="fa-solid fa-folder-open"></i> Profiles
+        </a>
+        <a href="#" class="menu-item" data-target="view-controller">
+          <i class="fa-solid fa-gamepad"></i> Controller
+        </a>
+        <a href="#" class="menu-item" data-target="view-automation">
+          <i class="fa-solid fa-puzzle-piece"></i> Automation (Block)
+        </a>
+        <a href="#" class="menu-item" data-target="view-behavior">
+          <i class="fa-solid fa-code"></i> Python Program
+        </a>
+        <a href="#" class="menu-item" data-target="view-logs">
+          <i class="fa-solid fa-receipt"></i> System Logs
+        </a>
+      </nav>
+
+      <div class="sidebar-footer" style="display: flex; flex-direction: column; gap: 6px; align-items: stretch;">
+        <span class="version-tag" id="lbl-app-version">Altair Control v2.0.0</span>
+        <button class="btn btn-secondary btn-xs" id="btn-check-update" style="width: 100%; font-size: 11px;">
+          <i class="fa-solid fa-arrows-rotate"></i> アップデート確認
+        </button>
+        <button class="btn btn-primary btn-xs" id="btn-apply-update" style="width: 100%; font-size: 11px; display: none;">
+          <i class="fa-solid fa-cloud-arrow-down"></i> 最新版へ更新
+        </button>
+      </div>
+    </aside>
+
+    <!-- メインコンテンツエリア -->
+    <main class="main-content">
+
+      <!-- ヘッダー -->
+      <header class="main-header">
+        <div class="header-title">
+          <h1 id="page-title">Dashboard</h1>
+          <p class="subtitle">Altair Module System 一括管理コンソール</p>
+        </div>
+
+        <!-- 接続情報・非常停止ステータス -->
+        <div class="header-status-panel">
+          <button class="btn btn-secondary btn-fullscreen" id="btn-fullscreen-toggle" title="全画面表示の切り替え">
+            <i class="fa-solid fa-expand"></i> 全画面表示
+          </button>
+
+          <div class="connection-pill shadow-sm" id="can-status-indicator">
+            <span class="status-dot disconnected"></span>
+            <span class="status-text">CAN: Disconnected</span>
+          </div>
+
+          <button class="btn btn-danger btn-emergency" id="btn-emergency-stop">
+            <i class="fa-solid fa-circle-stop"></i> EMERGENCY STOP
+          </button>
+        </div>
+      </header>
+
+      <!-- ビュー: Dashboard -->
+      <section id="view-dashboard" class="content-view active">
+        <!-- 上部コントロールボード -->
+        <div class="control-board glass-card">
+          <!-- 接続ポート設定 (Ethernet-CAN & USB-to-CAN) -->
+          <div class="control-group" id="group-connection-slcan">
+            <h3><i class="fa-solid fa-network-wired"></i> CAN Connection</h3>
+            <div class="control-status" id="slcan-connection-status"
+              style="margin-top: 4px; margin-bottom: 12px; font-size: 13px; font-weight: 600;">
+              状態: <span class="badge badge-danger" style="padding: 4px 8px; font-size: 11px;">未接続</span>
             </div>
 
-            <!-- 通信コントロール -->
-            <div class="connection-panel">
-                <h3>Connection (slcan)</h3>
-                <div class="input-group">
-                    <label>Bitrate</label>
-                    <select id="can-bitrate">
-                        <option value="125000">125k</option>
-                        <option value="250000">250k</option>
-                        <option value="500000">500k</option>
-                        <option value="1000000" selected>1M</option>
-                    </select>
-                </div>
-                <button id="btn-connect" class="btn btn-primary"><i class="fa-solid fa-link"></i> Connect USB</button>
-                <button id="btn-disconnect" class="btn btn-danger" disabled><i class="fa-solid fa-unlink"></i> Disconnect</button>
-                <div id="connection-status" class="status-indicator offline">Offline</div>
+            <!-- 接続モード切り替えタブ -->
+            <div class="connection-tabs" style="display: flex; gap: 8px; margin-bottom: 10px;">
+              <button class="btn btn-sm btn-primary" id="tab-mode-eth" style="flex: 1; padding: 4px 8px; font-size: 12px;">
+                <i class="fa-solid fa-ethernet"></i> Ethernet (推奨)
+              </button>
+              <button class="btn btn-sm btn-secondary" id="tab-mode-usb" style="flex: 1; padding: 4px 8px; font-size: 12px;">
+                <i class="fa-brands fa-usb"></i> USB (slcan)
+              </button>
             </div>
 
-            <hr>
+            <!-- Ethernet-CAN 接続フォーム -->
+            <div id="panel-conn-eth" class="connection-controls">
+              <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                <input type="text" id="txt-eth-ip" class="form-input" style="flex: 2; font-size: 13px;" placeholder="192.168.2.123" value="192.168.2.123">
+                <input type="number" id="txt-eth-port" class="form-input" style="flex: 1; font-size: 13px;" placeholder="5000" value="5000">
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-primary" id="btn-connect-eth"><i class="fa-solid fa-plug"></i> Connect ETH</button>
+                <button class="btn btn-secondary" id="btn-disconnect-eth" disabled>Disconnect</button>
+              </div>
+            </div>
 
-            <!-- モジュール管理 -->
-            <div class="module-manager">
-                <h3>Modules</h3>
-                <button class="btn btn-secondary" onclick="ui.showAddModuleModal()">
-                    <i class="fa-solid fa-plus"></i> Add Module
+            <!-- USB-to-CAN 接続フォーム -->
+            <div id="panel-conn-usb" class="connection-controls" style="display: none;">
+              <label class="toggle-checkbox" style="margin-bottom: 6px;">
+                <input type="checkbox" id="chk-auto-connect" checked>
+                <span class="toggle-switch"></span>
+                <span class="toggle-label">Auto Connect</span>
+              </label>
+
+              <div class="port-select-row" style="margin-bottom: 8px;">
+                <select id="sel-can-port" class="form-input" disabled>
+                  <option value="">ポートを検出中...</option>
+                </select>
+                <button class="btn btn-secondary btn-icon" id="btn-refresh-ports" disabled title="ポート再検出">
+                  <i class="fa-solid fa-arrows-rotate"></i>
                 </button>
-                <div id="module-list" class="module-list">
-                    <!-- 追加されたモジュールがここに並ぶ -->
-                </div>
+              </div>
+
+              <div class="btn-row">
+                <button class="btn btn-primary" id="btn-connect-can">Connect USB</button>
+                <button class="btn btn-secondary" id="btn-disconnect-can" disabled>Disconnect</button>
+              </div>
             </div>
-            
-            <hr>
-            
-            <!-- ナビゲーション -->
-            <div class="nav-menu">
-                <button class="nav-item active" data-target="view-dashboard"><i class="fa-solid fa-border-all"></i> Dashboard</button>
-                <button class="nav-item" data-target="view-automation"><i class="fa-solid fa-puzzle-piece"></i> Automation</button>
-                <button class="nav-item" data-target="view-controller"><i class="fa-solid fa-gamepad"></i> Controller</button>
-                <button class="nav-item" data-target="view-logs"><i class="fa-solid fa-terminal"></i> Logs</button>
-                <button class="nav-item" data-target="view-help"><i class="fa-solid fa-circle-question"></i> Help</button>
+          </div>
 
-                <!-- テーマ切り替えボタン -->
-                <div class="theme-toggle-row">
-                    <button id="btn-theme-toggle" class="btn-theme" title="ライトテーマに切り替え">
-                        <i class="fa-solid fa-sun"></i>
-                    </button>
-                    <span class="theme-label">テーマ</span>
-                </div>
+          <!-- 動作モードパラメータ送信 -->
+          <div class="control-group">
+            <h3><i class="fa-solid fa-sliders"></i> Parameter Settings</h3>
+            <p class="group-desc">MDDモータの制御を開始するにはパラメータを一括送信してください。</p>
+            <div class="btn-row-centered">
+              <button class="btn btn-success btn-lg" id="btn-send-params">
+                <i class="fa-solid fa-play"></i> Send Params & Start
+              </button>
             </div>
-        </aside>
-
-        <!-- メインコンテンツ -->
-        <main class="main-content">
-            <!-- ダッシュボードビュー (モジュール操作) -->
-            <section id="view-dashboard" class="view-section active">
-                <header class="view-header glass-panel">
-                    <h2>Dashboard</h2>
-                    <div class="header-actions">
-                        <button id="btn-export-config" class="btn btn-icon" title="設定をJSONファイルにエクスポート"><i class="fa-solid fa-file-export"></i></button>
-                        <button id="btn-import-config" class="btn btn-icon" title="JSONファイルから設定をインポート"><i class="fa-solid fa-file-import"></i></button>
-                        <button class="btn btn-icon" onclick="storage.saveConfig()" title="Save Config"><i class="fa-solid fa-save"></i></button>
-                        <button class="btn btn-icon btn-danger" onclick="storage.clearConfig()" title="Reset Config"><i class="fa-solid fa-trash-can"></i></button>
-                    </div>
-                </header>
-                <div id="dashboard-container" class="dashboard-grid">
-                    <!-- モジュールのカードがここに生成される -->
-                    <div class="empty-state">
-                        <i class="fa-solid fa-cubes"></i>
-                        <p>No modules added yet. Add a module from the sidebar.</p>
-                    </div>
-                </div>
-            </section>
-
-            <!-- オートメーションビュー (Blockly) -->
-            <section id="view-automation" class="view-section">
-                <header class="view-header glass-panel">
-                    <h2>自動化 (マクロ & トリガー) <span id="macro-status" class="badge" style="background:#475569; margin-left:10px;">停止中</span></h2>
-                    <div class="header-actions" style="flex-wrap: wrap;">
-                        <button id="btn-load-sample" class="btn btn-secondary"><i class="fa-solid fa-lightbulb"></i> サンプル</button>
-                        <button id="btn-build-check" class="btn btn-secondary"><i class="fa-solid fa-code"></i> 文法チェック</button>
-                        <button id="btn-run-macro" class="btn btn-success"><i class="fa-solid fa-play"></i> 実行</button>
-                        <button id="btn-stop-macro" class="btn btn-danger"><i class="fa-solid fa-stop"></i> 停止</button>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="toggle-trigger-engine">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="toggle-label" style="white-space: nowrap;">オートトリガーエンジン</span>
-                    </div>
-                </header>
-                <div id="blockly-container" class="blockly-wrapper"></div>
-            </section>
-
-            <!-- コントローラービュー (Gamepad) -->
-            <section id="view-controller" class="view-section">
-                <header class="view-header glass-panel">
-                    <h2><i class="fa-solid fa-gamepad"></i> Game Controller</h2>
-                    <div class="header-actions">
-                        <div id="gamepad-status" class="status-indicator offline" style="margin-top:0; padding: 6px 12px; margin-right: 10px;">Press any button on controller</div>
-                        <div style="border-left: 1px solid var(--border-color); height: 24px; margin: 0 10px;"></div>
-                        
-                        <select id="serial-ctrl-bitrate" style="width: 100px;">
-                            <option value="9600">9600</option>
-                            <option value="115200" selected>115200</option>
-                        </select>
-                        <button id="btn-connect-serial-ctrl" class="btn btn-primary" style="margin-bottom:0; width:auto;"><i class="fa-solid fa-link"></i> COM Connect</button>
-                        <button id="btn-disconnect-serial-ctrl" class="btn btn-danger" style="margin-bottom:0; width:auto;" disabled><i class="fa-solid fa-unlink"></i> Disconnect</button>
-                        <div id="serial-controller-status" class="status-indicator offline" style="margin-top:0; padding: 6px 12px; margin-left:10px;">COM Offline</div>
-                    </div>
-                </header>
-                <div class="controller-container">
-                    <div class="gamepad-test-area glass-panel">
-                        <h3>Input Test</h3>
-                        <p class="help-text">Press buttons or move sticks on your controller to see their index numbers. (PS Controller: Cross=0, Circle=1, Square=2, Triangle=3, L1=4, R1=5, L2=6, R2=7, etc.)</p>
-                        <div id="gamepad-test-output" class="test-output">Waiting for input...</div>
-                    </div>
-                    
-                    <div class="gamepad-mapping-area glass-panel" style="margin-top: 20px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                            <h3>Button / Axis Mappings</h3>
-                            <button class="btn btn-primary" style="width: auto; margin-bottom: 0;" onclick="gamepad.showAddMappingModal()">
-                                <i class="fa-solid fa-plus"></i> Add Mapping
-                            </button>
-                        </div>
-                        <div id="mapping-list" class="mapping-list">
-                            <!-- Mappings will be populated here -->
-                            <div class="empty-state">
-                                <i class="fa-solid fa-link-slash"></i>
-                                <p>No mappings defined yet.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- ログビュー -->
-            <section id="view-logs" class="view-section">
-                <header class="view-header glass-panel">
-                    <h2>System Logs</h2>
-                    <button class="btn btn-secondary" onclick="document.getElementById('log-output').innerHTML=''"><i class="fa-solid fa-eraser"></i> Clear</button>
-                </header>
-                <div class="log-container glass-panel">
-                    <pre id="log-output"></pre>
-                </div>
-            </section>
-
-            <!-- ヘルプビュー -->
-            <section id="view-help" class="view-section">
-                <header class="view-header glass-panel">
-                    <h2><i class="fa-solid fa-circle-question"></i> Usage Guide (使い方)</h2>
-                </header>
-                <div class="help-container glass-panel" style="padding: 20px; color: var(--text-color); overflow-y: auto; height: calc(100vh - 120px);">
-                    <h3>1. 接続 (Connection)</h3>
-                    <p>このアプリケーションは、Web Serial APIを利用してUSB接続されたCANアダプタ(slcanプロトコル)と通信します。</p>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li>左メニューの <strong>Connection (slcan)</strong> から、対象デバイスの通信速度(Bitrate)を選択します。</li>
-                        <li><strong>Connect USB</strong> をクリックし、ブラウザのポップアップから接続するCOMポートを選択してください。</li>
-                    </ul>
-
-                    <h3>2. モジュールの設定 (Modules)</h3>
-                    <p>操作したいハードウェア(MDD, Servo, Solenoid)をダッシュボードに追加します。</p>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li><strong>Add Module</strong> ボタンを押し、モジュールの種類、任意の名前、対象の <strong>Base CAN ID (Hex)</strong> を設定して追加します。</li>
-                        <li>各モジュールのカード下部にある <strong>Enable TX</strong> のチェックを入れると、実際にCANフレームが送信されるようになります。</li>
-                        <li><strong>MDDの場合:</strong> 最初にPIDゲインや動作モードを設定し、「Send Parameters (Set Param Mode)」を押してパラメータを確定させてから目標値を操作してください。</li>
-                    </ul>
-
-                    <h3>3. ゲームコントローラーでの操作 (Game Controller)</h3>
-                    <p>PCに接続されたゲームパッドを用いてモジュールを操作できます。</p>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li><strong>Controller</strong> 画面を開き、ゲームパッドの適当なボタンを押して「Connected」になることを確認します。</li>
-                        <li><strong>Add Mapping</strong> から、ボタンまたはスティック軸に対して、どのアクション(トグルや加算など)を割り当てるか設定してください。</li>
-                    </ul>
-
-                    <h3>4. 自動化とマクロ (Automation)</h3>
-                    <p>Blocklyによるビジュアルプログラミングで自動化が行えます。</p>
-                    <ul style="margin-left: 20px; margin-bottom: 20px;">
-                        <li>ブロックを組み合わせて、「マクロ実行時」に一連の動作（例: 目標値設定→1秒待機→目標値ゼロ）を実行させることができます。</li>
-                        <li><strong>オートトリガーエンジン</strong>をONにすると、「トリガーエンジンON時」のブロック内の条件式（例: MDDのスイッチ入力が1になったら）が常に評価され、自動でアクションが発火します。</li>
-                    </ul>
-
-                    <h3>5. 設定の保存について</h3>
-                    <p>追加したモジュールやコントローラーのマッピング、Blocklyのプログラムは、ブラウザのLocalStorageに自動的に保存され、次回アクセス時に復元されます。手動で保存する場合はダッシュボード右上の保存アイコンをクリックしてください。</p>
-                </div>
-            </section>
-        </main>
-    </div>
-
-    <!-- モジュール追加モーダル -->
-    <div id="add-module-modal" class="modal-overlay hidden">
-        <div class="modal-content glass-panel">
-            <h3>Add New Module</h3>
-            <div class="form-group">
-                <label>Module Type</label>
-                <select id="modal-module-type">
-                    <option value="mdd">MDD (Motor Driver)</option>
-                    <option value="servo">Servo (6ch)</option>
-                    <option value="solenoid">Solenoid Valve (12ch)</option>
-                </select>
+            <div class="control-status" id="control-mode-status">
+              ステータス: <span class="badge badge-warning">パラメータ送信待ち (Setup Mode)</span>
             </div>
-            <div class="form-group">
-                <label>Module Name (Alias)</label>
-                <input type="text" id="modal-module-name" placeholder="e.g. Front MDD">
+          </div>
+
+          <!-- モジュール追加 -->
+          <div class="control-group">
+            <h3><i class="fa-solid fa-circle-plus"></i> Manage Modules</h3>
+            <p class="group-desc">制御対象のモジュールを動的に追加・編集します。</p>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="btn-add-module-modal">
+                <i class="fa-solid fa-plus"></i> Add Module
+              </button>
             </div>
-            <div class="form-group">
-                <label>Base CAN ID (Hex)</label>
-                <input type="text" id="modal-module-id" placeholder="e.g. 100, 200, 300">
-                <small class="help-text" id="modal-id-help" style="line-height: 1.4;">
-                    Sample IDs:<br>
-                    - <b>Servo</b>: 100<br>
-                    - <b>MDD</b>: 200<br>
-                    - <b>Solenoid Valve</b>: 300
-                </small>
+          </div>
+
+          <!-- ゲームパッド常時モニター -->
+          <div class="control-group" id="dashboard-gamepad-group">
+            <h3><i class="fa-solid fa-gamepad"></i> Gamepad Monitor</h3>
+            <div id="dashboard-gamepad-disconnected" class="group-desc" style="text-align: center; padding: 10px 0;">
+              <i class="fa-solid fa-gamepad"
+                style="font-size: 24px; color: var(--text-muted); margin-bottom: 6px; display: block;"></i>
+              コントローラー未接続
             </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="ui.hideAddModuleModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="ui.confirmAddModule()">Add</button>
+            <div id="dashboard-gamepad-connected" style="display: none; flex-direction: column; gap: 8px;">
+              <div
+                style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-top: 4px;">
+                <span>L-Stick</span>
+                <span id="lbl-dash-lstick">X: 0.00 | Y: 0.00</span>
+              </div>
+              <div class="progress-bar-container"
+                style="background: #e8eaed; border-radius: 4px; height: 8px; width: 100%; overflow: hidden; position: relative;">
+                <div id="bar-dash-lx"
+                  style="background: var(--color-primary); height: 100%; width: 50%; transition: width 0.05s ease;">
+                </div>
+              </div>
+              <div class="progress-bar-container"
+                style="background: #e8eaed; border-radius: 4px; height: 8px; width: 100%; overflow: hidden; position: relative; margin-top: 2px;">
+                <div id="bar-dash-ly"
+                  style="background: var(--color-primary); height: 100%; width: 50%; transition: width 0.05s ease;">
+                </div>
+              </div>
+
+              <div
+                style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-top: 6px;">
+                <span>R-Stick</span>
+                <span id="lbl-dash-rstick">X: 0.00 | Y: 0.00</span>
+              </div>
+              <div class="progress-bar-container"
+                style="background: #e8eaed; border-radius: 4px; height: 8px; width: 100%; overflow: hidden; position: relative;">
+                <div id="bar-dash-rx"
+                  style="background: var(--color-primary); height: 100%; width: 50%; transition: width 0.05s ease;">
+                </div>
+              </div>
+              <div class="progress-bar-container"
+                style="background: #e8eaed; border-radius: 4px; height: 8px; width: 100%; overflow: hidden; position: relative; margin-top: 2px;">
+                <div id="bar-dash-ry"
+                  style="background: var(--color-primary); height: 100%; width: 50%; transition: width 0.05s ease;">
+                </div>
+              </div>
+
+              <!-- 主要ボタンインジケータ -->
+              <div
+                style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-top: 8px;">
+                <span>Buttons</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;" id="dashboard-buttons-container">
+                <span id="btn-dash-0" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">A</span>
+                <span id="btn-dash-1" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">B</span>
+                <span id="btn-dash-2" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">X</span>
+                <span id="btn-dash-3" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">Y</span>
+                <span id="btn-dash-4" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">L1</span>
+                <span id="btn-dash-5" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">R1</span>
+                <span id="btn-dash-6" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">L2</span>
+                <span id="btn-dash-7" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">R2</span>
+                <span id="btn-dash-8" class="badge badge-secondary"
+                  style="font-size: 9px; padding: 2px 6px;">Share</span>
+                <span id="btn-dash-9" class="badge badge-secondary"
+                  style="font-size: 9px; padding: 2px 6px;">Start</span>
+                <span id="btn-dash-10" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">L3</span>
+                <span id="btn-dash-11" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;">R3</span>
+              </div>
+              <!-- 十字キーインジケータ -->
+              <div
+                style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-top: 6px;">
+                <span>D-Pad</span>
+              </div>
+              <div style="display: flex; gap: 4px; align-items: center;">
+                <span id="btn-dash-14" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;"><i
+                    class="fa-solid fa-arrow-left"></i></span>
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <span id="btn-dash-12" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;"><i
+                      class="fa-solid fa-arrow-up"></i></span>
+                  <span id="btn-dash-13" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;"><i
+                      class="fa-solid fa-arrow-down"></i></span>
+                </div>
+                <span id="btn-dash-15" class="badge badge-secondary" style="font-size: 9px; padding: 2px 6px;"><i
+                    class="fa-solid fa-arrow-right"></i></span>
+              </div>
             </div>
+          </div>
         </div>
-    </div>
 
-    <!-- マッピング追加モーダル -->
-    <div id="add-mapping-modal" class="modal-overlay hidden">
-        <div class="modal-content glass-panel" style="width: 500px;">
-            <h3>Add Controller Mapping</h3>
-            <div style="display:flex; gap: 15px;">
-                <div class="form-group" style="flex:1;">
-                    <label>Input Type</label>
-                    <select id="modal-map-input-type" onchange="gamepad.updateModalOptions()">
-                        <option value="button">Button</option>
-                        <option value="axis">Axis (Stick)</option>
-                    </select>
-                </div>
-                <div class="form-group" style="flex:1;">
-                    <label>Input Index</label>
-                    <input type="number" id="modal-map-input-index" min="0" value="0">
-                </div>
-            </div>
-            
-            <div class="form-group" id="axis-dir-group" style="display: none;">
-                <label>Axis Direction</label>
-                <select id="modal-map-axis-dir">
-                    <option value="1">Positive (+)</option>
-                    <option value="-1">Negative (-)</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>Target Module</label>
-                <select id="modal-map-module" onchange="gamepad.updateModalOptions()"></select>
-            </div>
-
-            <div class="form-group">
-                <label>Action</label>
-                <select id="modal-map-action" onchange="gamepad.updateModalOptions()"></select>
-            </div>
-
-            <div class="form-group" id="modal-map-param-group">
-                <!-- 動的にパラメータ入力UIを生成 -->
-            </div>
-
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="gamepad.hideAddMappingModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="gamepad.confirmAddMapping()">Save Mapping</button>
-            </div>
+        <!-- 動的に追加されるモジュールカードのグリッド -->
+        <div class="modules-grid" id="modules-container">
+          <!-- JSで動的に追加されます -->
         </div>
-    </div>
+      </section>
 
-    <!-- Scripts -->
-    <script src="js/storage.js"></script>
-    <script src="js/can_serial.js"></script>
-    <script src="js/controller_serial.js"></script>
-    <script src="js/automation.js"></script>
-    <script src="js/gamepad.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/main.js"></script>
+      <!-- ビュー: Profiles -->
+      <section id="view-profiles" class="content-view">
+        <div class="glass-card page-card">
+          <h2><i class="fa-solid fa-folder-open"></i> プロファイル管理</h2>
+          <p>アームテスト用、足回りのみ、本番フル構成など、用途に応じたモジュール設定プロファイルを瞬時に切り替えます。</p>
+
+          <div class="profile-manager-row">
+            <!-- 保存プロファイルリスト -->
+            <div class="profile-list-panel">
+              <h3>保存済みプロファイル</h3>
+              <ul class="profile-list" id="profile-list-ul">
+                <!-- JSで動的に生成 -->
+              </ul>
+            </div>
+
+            <!-- 現在の設定の保存 ＆ エクスポート -->
+            <div class="profile-ops-panel">
+              <h3>プロファイル操作</h3>
+              <div class="ops-card">
+                <h4>現在の設定を保存</h4>
+                <div class="input-row">
+                  <input type="text" id="txt-new-profile-name" class="form-input" placeholder="プロファイル名を入力">
+                  <button class="btn btn-success" id="btn-save-profile">保存する</button>
+                </div>
+              </div>
+
+              <div class="ops-card">
+                <h4>外部からインポート (JSON)</h4>
+                <div class="file-upload-row">
+                  <input type="file" id="file-import-profile" accept=".json" style="display: none;">
+                  <button class="btn btn-primary btn-block"
+                    onclick="document.getElementById('file-import-profile').click()">
+                    <i class="fa-solid fa-file-import"></i> JSONファイルを読み込む
+                  </button>
+                </div>
+              </div>
+
+              <div class="ops-card">
+                <h4>現在の設定をエクスポート</h4>
+                <button class="btn btn-secondary btn-block" id="btn-export-profile">
+                  <i class="fa-solid fa-file-export"></i> JSONとしてダウンロード
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ビュー: Controller -->
+      <section id="view-controller" class="content-view">
+        <div class="glass-card page-card">
+          <h2><i class="fa-solid fa-gamepad"></i> ゲームコントローラー (PS5対応)</h2>
+          <p>PCやスマホに接続されたコントローラーを検出し、スティックやボタンに各モジュール出力を割り当てます。</p>
+
+          <div class="controller-status-card">
+            <div class="ctrl-indicator" id="gamepad-status-indicator">
+              <i class="fa-solid fa-gamepad gamepad-icon disconnected"></i>
+              <span class="ctrl-status-text">Not Connected (コントローラー未接続)</span>
+            </div>
+            <p class="help-text">※コントローラーのいずれかのボタンを押すと認識されます。</p>
+          </div>
+
+          <div class="mapping-container">
+            <div class="mapping-header">
+              <h3>割り当てマップ一覧 (Mappings)</h3>
+              <button class="btn btn-primary btn-sm" id="btn-add-mapping">
+                <i class="fa-solid fa-plus"></i> 新規割り当てを追加
+              </button>
+            </div>
+
+            <div class="mapping-table-wrapper">
+              <table class="mapping-table">
+                <thead>
+                  <tr>
+                    <th>コントローラー入力 (ボタン/軸)</th>
+                    <th>ターゲットモジュール</th>
+                    <th>操作アクション</th>
+                    <th>係数/スケール</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="gamepad-mappings-body">
+                  <!-- 動的に追加されます -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ビュー: Automation -->
+      <section id="view-automation" class="content-view">
+        <div class="automation-container" style="position: relative; overflow: hidden; width: 100%;">
+          <!-- Blockly エディタ領域 -->
+          <div class="glass-card blockly-card" style="width: 100%; position: relative;">
+            <div class="blockly-header">
+              <h2><i class="fa-solid fa-puzzle-piece"></i> Blockly ビジュアルマクロ作成</h2>
+              <div class="blockly-btn-group">
+                <button class="btn btn-secondary" id="btn-toggle-code">
+                  <i class="fa-solid fa-code"></i> コードを表示
+                </button>
+                <button class="btn btn-primary" id="btn-save-blockly-xml">
+                  <i class="fa-solid fa-floppy-disk"></i> ブロックを保存
+                </button>
+                <button class="btn btn-success" id="btn-run-blockly">
+                  <i class="fa-solid fa-play"></i> マクロを実行
+                </button>
+                <button class="btn btn-secondary" id="btn-stop-blockly">
+                  <i class="fa-solid fa-stop"></i> 停止
+                </button>
+              </div>
+            </div>
+            <p>Scratchライクなブロックを組み合わせて、センサーフィードバックに応じた自動制御を作成します。</p>
+            <div id="blocklyDiv" style="height: 600px; width: 100%; border-radius: 8px; margin-top: 15px;"></div>
+          </div>
+
+          <!-- コードプレビュー スライドドロワー -->
+          <div class="code-drawer" id="blockly-code-drawer">
+            <div class="code-drawer-header">
+              <h3><i class="fa-solid fa-file-code"></i> 生成された Python コード</h3>
+              <button class="btn-close-drawer" id="btn-close-drawer">&times;</button>
+            </div>
+            <div class="code-drawer-body">
+              <p class="group-desc" style="margin-bottom: 10px;">ブロックの配置に応じて、自律制御Pythonコードがリアルタイム生成されます。</p>
+              <div class="terminal-view code-preview-view" id="blockly-code-terminal"
+                style="height: calc(100% - 100px); overflow-y: auto;">
+                <pre><code id="blockly-code-area"># ブロックを配置するとここにコードが生成されます...</code></pre>
+              </div>
+              <button class="btn btn-secondary btn-block" id="btn-export-blockly-code"
+                style="margin-top: 12px; border-radius: 20px;">
+                <i class="fa-solid fa-file-arrow-down"></i> スクリプトをローカル保存
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ビュー: Behavior -->
+      <section id="view-behavior" class="content-view">
+        <div class="behavior-layout">
+          <!-- スクリプトマネージャー -->
+          <div class="glass-card behavior-list-card">
+            <h2><i class="fa-solid fa-terminal"></i> 動作プログラム実行</h2>
+            <p class="group-desc">Pythonで直接書かれた制御・自律動作プログラムを選択して実行します。</p>
+
+            <div class="behavior-selector">
+              <h3>プログラムファイル選択</h3>
+              <select id="sel-behavior-script" class="form-input">
+                <option value="">読み込み中...</option>
+              </select>
+            </div>
+
+            <div class="behavior-controls-row">
+              <button class="btn btn-success btn-lg btn-block" id="btn-start-behavior">
+                <i class="fa-solid fa-play"></i> 起動 (Start Program)
+              </button>
+              <button class="btn btn-danger btn-lg btn-block" id="btn-stop-behavior" disabled>
+                <i class="fa-solid fa-circle-stop"></i> 停止 (Stop Program)
+              </button>
+            </div>
+
+            <div class="behavior-status-card mt-3">
+              <h4>現在のプログラム状態</h4>
+              <div class="status-badge-container">
+                <span class="badge badge-secondary" id="lbl-behavior-status">IDLE</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ログコンソール (ターミナル風) -->
+          <div class="glass-card behavior-console-card">
+            <div class="console-header">
+              <h3><i class="fa-solid fa-rectangle-list"></i> リアルタイムプログラム出力</h3>
+              <button class="btn btn-secondary btn-xs" id="btn-clear-console">Clear Console</button>
+            </div>
+            <div class="terminal-view" id="behavior-terminal">
+              <div class="terminal-line system-msg">[SYSTEM] 動作プログラム起動時に標準出力・標準エラーがここにリアルタイムストリーミングされます。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ビュー: Logs -->
+      <section id="view-logs" class="content-view">
+        <div class="glass-card page-card">
+          <div class="console-header">
+            <h2><i class="fa-solid fa-receipt"></i> システム送受信 CAN ログ</h2>
+            <button class="btn btn-secondary btn-sm" id="btn-clear-can-logs">Clear Logs</button>
+          </div>
+          <p>Ethernet-CAN / USB-to-CAN 経由で送受信される raw CAN フレームをリアルタイムで表示します。</p>
+          <div class="terminal-view" id="can-logs-terminal" style="height: 500px;">
+            <!-- CANログが流れます -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- モジュール追加・編集モーダルダイアログ -->
+  <div class="modal-overlay" id="add-module-modal">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h2 id="modal-title">Add Module</h2>
+        <button class="modal-close-btn" id="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Module Type (モジュール種類)</label>
+          <select id="modal-module-type" class="form-input">
+            <option value="mdd">MDD (4ch モータドライバ)</option>
+            <option value="servo">Servo (6ch サーボ)</option>
+            <option value="solenoid">Solenoid Valve (12ch 電磁弁)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Module Name (任意の識別名)</label>
+          <input type="text" id="modal-module-name" class="form-input" placeholder="例: drive_mdd_left">
+        </div>
+        <div class="form-group">
+          <label>Base CAN ID (Hex形式)</label>
+          <input type="text" id="modal-module-id" class="form-input" placeholder="例: 0x200">
+        </div>
+        <div class="form-group">
+          <label>Description (説明文)</label>
+          <input type="text" id="modal-module-desc" class="form-input" placeholder="例: 走行用左側モーター">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-cancel-modal">Cancel</button>
+        <button class="btn btn-success" id="btn-save-module">Save Module</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript -->
+  <script src="/js/app.js"></script>
+  <script src="/js/gamepad.js"></script>
 </body>
+
 </html>

@@ -1,0 +1,123 @@
+name: Auto Build and Release Windows Binary
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "リリースするバージョン名 (空欄の場合は自動採番)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version and sync Cargo.toml / tauri.conf.json
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = ""
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $tag = "${{ github.ref_name }}"
+          } elseif ("${{ github.event.inputs.version }}" -ne "") {
+            $tag = "${{ github.event.inputs.version }}"
+            if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
+          } else {
+            # Cargo.toml のベースバージョンを取得
+            $cargoContent = Get-Content "Cargo.toml" -Raw
+            $baseVer = "2.0.0"
+            if ($cargoContent -match 'version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"') {
+              $baseVer = $matches[1]
+            }
+
+            # 既存の v*.*.* タグの最大バージョンと比較して自動でパッチ番号を +1 する
+            $tags = git tag -l "v[0-9]*.[0-9]*.[0-9]*"
+            if (-not $tags) {
+              $tag = "v$baseVer"
+            } else {
+              $latest = $tags |
+                ForEach-Object { [version]($_.TrimStart('v')) } |
+                Sort-Object -Descending |
+                Select-Object -First 1
+              $baseObj = [version]$baseVer
+              if ($baseObj -gt $latest) {
+                $tag = "v$baseVer"
+              } else {
+                $nextVer = "$($latest.Major).$($latest.Minor).$($latest.Build + 1)"
+                $tag = "v$nextVer"
+              }
+            }
+          }
+
+          $cleanVer = $tag.TrimStart('v')
+          Write-Host "Target Version: $cleanVer (Tag: $tag)"
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$cleanVer" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          # ビルドされるバイナリ自身の CARGO_PKG_VERSION をリリースバージョンと一致させる
+          $cargo = Get-Content "Cargo.toml" -Raw
+          $cargo = [regex]::Replace($cargo, '(?m)^version\s*=\s*"[^"]+"', "version = `"$cleanVer`"", 1)
+          Set-Content -Path "Cargo.toml" -Value $cargo -Encoding UTF8
+
+          if (Test-Path "tauri.conf.json") {
+            $tauri = Get-Content "tauri.conf.json" -Raw
+            $tauri = [regex]::Replace($tauri, '"version"\s*:\s*"[^"]+"', "`"version`": `"$cleanVer`"", 1)
+            Set-Content -Path "tauri.conf.json" -Value $tauri -Encoding UTF8
+          }
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package release archive for self_update and standalone distribution
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $pkgDir = "altair_release_pkg"
+          New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
+
+          Copy-Item "target/release/altair_module_system_control.exe" -Destination "$pkgDir/"
+          Copy-Item "index.html" -Destination "$pkgDir/"
+          Copy-Item "README.md" -Destination "$pkgDir/"
+          Copy-Item "css" -Destination "$pkgDir/css" -Recurse
+          Copy-Item "js" -Destination "$pkgDir/js" -Recurse
+          Copy-Item "config" -Destination "$pkgDir/config" -Recurse
+          Copy-Item "profiles" -Destination "$pkgDir/profiles" -Recurse
+          Copy-Item "user_behaviors" -Destination "$pkgDir/user_behaviors" -Recurse
+          Copy-Item "altair_core" -Destination "$pkgDir/altair_core" -Recurse
+          Copy-Item "rclpy" -Destination "$pkgDir/rclpy" -Recurse
+          Copy-Item "docs" -Destination "$pkgDir/docs" -Recurse
+
+          # self_update クレートが x86_64-pc-windows-msvc ターゲットの zip アセットを自動検出できるよう命名
+          Compress-Archive -Path "$pkgDir/*" -DestinationPath "altair_module_system_control-$tag-x86_64-pc-windows-msvc.zip" -Force
+
+      - name: Create GitHub Release and Upload Binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Altair Module System Control ${{ steps.ver.outputs.tag }}"
+          files: |
+            altair_module_system_control-*-x86_64-pc-windows-msvc.zip
+            target/release/altair_module_system_control.exe
+          generate_release_notes: true

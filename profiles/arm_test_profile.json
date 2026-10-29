@@ -1,0 +1,17 @@
+{
+  "modules": [
+    {
+      "name": "arm_servo",
+      "type": "servo",
+      "base_id": "0x100",
+      "description": "アーム制御用6chサーボ"
+    },
+    {
+      "name": "valve_controller",
+      "type": "solenoid",
+      "base_id": "0x300",
+      "description": "吸引・ハンド用12ch電磁弁"
+    }
+  ]
+}
+

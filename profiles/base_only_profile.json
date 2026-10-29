@@ -1,0 +1,17 @@
+{
+  "modules": [
+    {
+      "name": "MDD1",
+      "type": "mdd",
+      "base_id": "0x200",
+      "description": "走行用4chモータドライバ",
+      "parameters": {
+        "m1": { "p": 10.0, "i": 0.0, "d": 0.0, "diameter": 100.0, "direction": 1, "mode": 0 },
+        "m2": { "p": 10.0, "i": 0.0, "d": 0.0, "diameter": 100.0, "direction": 1, "mode": 0 },
+        "m3": { "p": 10.0, "i": 0.0, "d": 0.0, "diameter": 100.0, "direction": 1, "mode": 0 },
+        "m4": { "p": 10.0, "i": 0.0, "d": 0.0, "diameter": 100.0, "direction": 1, "mode": 0 }
+      }
+    }
+  ]
+}
+

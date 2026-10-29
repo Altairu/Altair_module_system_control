@@ -1,52 +1,71 @@
-# Altair Web Controller
+# Altair Module System Control v2
 
-Altair Module System の各モジュール（MDD, Servo, Solenoid Valve）をブラウザから直接制御するためのウェブアプリケーションです。
-ローカルのPythonサーバー等を立ち上げる必要なく、ブラウザから直接USBシリアル通信（slcanプロトコル）を行うことができます。
-
-## アクセスURL
-https://altairu.github.io/Altair_module_system_control/
-
-## ご利用時の注意点（重要）
-本アプリケーションは、ブラウザの標準機能である **Web Serial API** を使用してハードウェアと通信します。
-
-- **対応ブラウザ**: パソコン版の **Google Chrome** または **Microsoft Edge** でのみ動作します。（FirefoxやSafari、スマートフォンからはシリアル通信ができません）
-- **対応インターフェース**: `slcan` プロトコル（USBをCOMポートとして認識するもの）にのみ対応しています。専用ドライバ（PCANやSocketCAN）が必要なデバイスではご利用いただけません。
+Altair Module System の各モジュールを Windows 11 上の軽量ネイティブアプリケーションとして制御するための統合制御システムです。
+Node.js や npm、ROS2 環境を必要とせず、Rust と Tauri v2 によってコンパイルされた単一の実行ファイル `altair_module_system_control.exe` で最新の Ethernet-CAN 変換基板および USB-to-CAN アダプタによる 100Hz 制御や、Blockly / Python による自動制御プログラムの実行が可能です。
 
 ## 特徴
-- **完全Webベース**: GitHub Pages等のURLを開くだけで、インストール不要で動作します。
-- **リッチなUI**: Glassmorphismとダークテーマを取り入れたモダンなダッシュボード。
-- **動的構成**: モジュールを無制限に追加し、それぞれのCAN IDを自由に設定可能。
-- **Automation (ブロック制御)**: Google Blocklyを用いたScratchライクなマクロ・トリガー作成機能。MDDのリミットスイッチ等を条件に、他のモジュールを自動制御できます。
-- **状態の保存**: ブラウザのローカルストレージに設定が自動保存され、次回アクセス時に復元されます。
 
-## 使い方 (Usage)
+* Rust と Tauri v2 によるネイティブ構成のため、npm や Node.js が不要で、Windows 11 標準の WebView2 上で高精細かつ省メモリに動作します。
+* `self_update` クレートによる GitHub Releases 連携を内蔵しており、アプリ起動時に新バージョンを自動確認し、ワンクリックで最新版の `.exe` へ自己更新できます。
+* Ethernet-CAN 基板および USB-to-CAN の両方に対応し、GUI上でワンクリックで切り替えと接続ができます。
+* モジュール構成を JSON プロファイルとして保存や切り替え、インポート、エクスポートが可能です。
+* Google Blockly を用いたビジュアルプログラミングから Python コードを自動生成し、足回り運動学ブロックやゲームパッド連動を含む動作プログラムをそのまま実行できます。
 
-本アプリケーションの基本的な使い方について説明します。
-より詳細な情報は、Webアプリ内の「Help」メニューからも確認できます。
+## システム構成
 
-### 1. デバイスの接続
-1. **USBの接続**: CANモジュールを操作するためのシリアル変換器（slcan対応デバイス）をPCのUSBポートに接続します。
-2. **ブラウザの操作**: アプリ画面左上の「Connection (slcan)」パネルにて、通信速度（Bitrate）を選択し、「Connect USB」ボタンをクリックします。
-3. **ポートの選択**: ブラウザのポップアップが表示されるので、接続したCOMポート（USBシリアルデバイス）を選択して接続します。
+```mermaid
+flowchart LR
+    UI["Tauri v2 Window (WebView2)"] <-->|"HTTP REST / WebSocket"| Server["Rust Backend (axum + tokio)"]
+    Behavior["Python Behavior Process"] <-->|"WebSocket"| Server
+    Server <-->|"self_update"| GH["GitHub Releases"]
+    Server -->|"100Hz Control Loop"| MM["Rust Module Manager"]
+    MM <-->|"TCP 20B TX / 60B RX"| EthBridge["Rust Ethernet-CAN Bridge"]
+    MM <-->|"Serial slcan"| UsbBridge["Rust USB-CAN Bridge"]
+    EthBridge <-->|"192.168.2.123:5000"| Board["LANtoCAN Board"]
+    UsbBridge <-->|"USB Serial"| Slcan["USB-to-CAN Adapter"]
+```
 
-### 2. モジュールの追加と操作
-1. **モジュールの追加**: 左メニューの「Modules」セクションにある「Add Module」ボタンをクリックします。
-2. **情報の設定**: モジュールの種類（MDD、Servo、Solenoid Valve）、任意の名前、Base CAN ID（Hex形式）を入力して追加します。
-3. **ダッシュボードでの操作**:
-   - **Dashboard** 画面に追加されたモジュールのカードが表示されます。
-   - スライダーによる目標値の変更、ボタンによるON/OFF操作が行えます。
-   - **MDDの場合**: モーターごとにPIDゲインや動作モード（Speed/Angle/Pos）を設定し、「Send Parameters」ボタンで設定を送信した後、制御を行ってください。
-   - カード下部の **Enable TX** にチェックを入れると、実際のハードウェアへCANフレームが送信されます。
+## 起動とビルド方法
 
-### 3. ゲームコントローラーでの操作
-1. **コントローラーの接続**: PCにUSBまたはBluetoothでゲームコントローラーを接続し、適当なボタンを押します。
-2. **認識の確認**: **Controller** 画面のステータスが「Connected」になることを確認します。
-3. **マッピングの追加**: 「Add Mapping」から、コントローラーのボタン/軸に対して、どのモジュールをどのように操作するか（例：目標値への加算、バルブのトグルなど）を割り当てます。
+ビルド済みの実行ファイルを直接起動する場合は、プロジェクトルートにある実行ファイルを実行します。
 
-### 4. 自動化 (Blocklyマクロ)
-- **Automation** 画面では、ブロックを組み合わせて条件分岐や遅延（ディレイ）を伴う一連の操作を作成できます。
-- **マクロ実行**: 作成したブロックプログラムを手動で「実行」ボタンから走らせることができます。
-- **オートトリガーエンジン**: エンジンを「ON」にすると、モジュールからのステータス情報（MDDのスイッチ入力など）を条件に、自動的にブロック内の処理を呼び出すことができます。
+```powershell
+.\altair_module_system_control.exe
+```
 
-### 5. 今後の拡張や課題について
-ソースコードのリポジトリ内にある [FUTURE_PLANS.md](FUTURE_PLANS.md) をご参照ください。
+ウィンドウを開かずにバックグラウンドのWebサーバーとして起動する場合は `--server` オプションを付与します。
+
+```powershell
+.\altair_module_system_control.exe --server
+```
+
+ソースコードからリリースビルドを行う場合は以下のコマンドを実行します。
+
+```powershell
+cargo build --release
+```
+
+## GitHub Actions による自動ビルドと自動アップデート
+
+* `main` ブランチへコードをプッシュするか、`v2.0.1` のようなタグをプッシュすると、`.github/workflows/release.yml` の GitHub Actions が自動的に起動します。
+* GitHub Actions 上でバージョン番号の自動採番、`Cargo.toml` と `tauri.conf.json` のバージョン同期、`cargo build --release` による Windows 用 `.exe` のビルド、そして GitHub Releases への公開までがすべて自動で実行されます。
+* アプリ起動時には `self_update` クレートが GitHub リポジトリ `Altairu/Altair_module_system_control` の Releases を自動確認します。新しいバージョンが公開されている場合は左メニュー下部に更新ボタンが表示され、クリックすると最新バイナリをダウンロードして実行ファイルを自己更新します。
+
+## 使い方
+
+### Ethernet-CAN 基板での接続
+
+* PCの有線LANアダプタに固定IPアドレスとして `192.168.2.100`、サブネットマスクとして `255.255.255.0` を設定します。
+* 画面左側の Connection パネルで Ethernet タブを選択します。
+* IPアドレスに `192.168.2.123`、ポート番号に `5000` が入力されていることを確認し、Connect ボタンを押します。
+
+### USB-to-CAN での接続
+
+* 画面左側の Connection パネルで USB タブを選択します。
+* 自動探索にチェックを入れるか、COMポートを選択して Connect ボタンを押します。
+
+### モジュールの制御開始
+
+* Dashboard 画面で各MDDモジュールの制御モードやPIDゲインを設定します。
+* 左パネルの Send Params & Start ボタンを押すと、各モジュールへPIDゲインと制御モードが送信され、制御ループが開始されます。
+* 各モジュールカード上部の UI操作送信 トグルをONにすると、スライダーやボタンの操作がリアルタイムにハードウェアへ送信されます。
