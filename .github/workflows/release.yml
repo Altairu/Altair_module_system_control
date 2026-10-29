@@ -101,6 +101,7 @@ jobs:
           Copy-Item "target/release/altair_module_system_control.exe" -Destination "$pkgDir/"
           Copy-Item "index.html" -Destination "$pkgDir/"
           Copy-Item "README.md" -Destination "$pkgDir/"
+          Copy-Item "uninstall.bat" -Destination "$pkgDir/"
           Copy-Item "css" -Destination "$pkgDir/css" -Recurse
           Copy-Item "js" -Destination "$pkgDir/js" -Recurse
           Copy-Item "config" -Destination "$pkgDir/config" -Recurse

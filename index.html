@@ -61,9 +61,14 @@
       <div class="sidebar-footer" style="display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <span class="version-tag" id="lbl-sidebar-version">v2.0.5</span>
-          <button class="btn btn-secondary btn-xs" id="btn-check-update" style="font-size: 11px; padding: 2px 8px;">
-            更新確認
-          </button>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-secondary btn-xs" id="btn-open-help" title="ヘルプ / 権利情報" style="font-size: 11px; padding: 2px 6px;">
+              <i class="fa-solid fa-circle-question"></i>
+            </button>
+            <button class="btn btn-secondary btn-xs" id="btn-check-update" style="font-size: 11px; padding: 2px 8px;">
+              更新確認
+            </button>
+          </div>
         </div>
         <button class="btn btn-primary btn-xs" id="btn-apply-update" style="display: none; width: 100%;">
           <i class="fa-solid fa-cloud-arrow-down"></i> 最新版へ更新
@@ -602,8 +607,11 @@
           <div>Copyright &copy; Altair All Rights Reserved.</div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" id="btn-ok-help-modal">OK</button>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-danger btn-xs" id="btn-app-uninstall" style="font-size: 11px; padding: 4px 10px;">
+          <i class="fa-solid fa-trash-can"></i> アプリをアンインストール
+        </button>
+        <button class="btn btn-primary" id="btn-ok-help-modal">閉じる</button>
       </div>
     </div>
   </div>

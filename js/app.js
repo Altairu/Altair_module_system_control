@@ -1559,6 +1559,30 @@ document.addEventListener("DOMContentLoaded", () => {
   const helpAboutModal = document.getElementById("help-about-modal");
   const btnCloseHelpModal = document.getElementById("btn-close-help-modal");
   const btnOkHelpModal = document.getElementById("btn-ok-help-modal");
+  const btnOpenHelp = document.getElementById("btn-open-help");
+  const btnAppUninstall = document.getElementById("btn-app-uninstall");
+
+  if (btnOpenHelp && helpAboutModal) {
+    btnOpenHelp.addEventListener("click", () => helpAboutModal.classList.add("active"));
+  }
+
+  if (btnAppUninstall) {
+    btnAppUninstall.addEventListener("click", async () => {
+      if (!confirm("Altair Module System Control をアンインストールしますか？\nWindowsのアンインストーラーを起動します。")) {
+        return;
+      }
+      try {
+        const res = await fetch("/api/system/uninstall", { method: "POST" });
+        const data = await res.json();
+        alert(data.message);
+        if (data.success && helpAboutModal) {
+          helpAboutModal.classList.remove("active");
+        }
+      } catch (err) {
+        alert("アンインストーラーの起動要求に失敗しました: " + err);
+      }
+    });
+  }
 
   async function openExternalUrl(url) {
     try {

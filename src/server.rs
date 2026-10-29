@@ -221,6 +221,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/config/update", post(api_update_config))
         .route("/api/update/check", get(api_update_check))
         .route("/api/update/apply", post(api_update_apply))
+        .route("/api/system/uninstall", post(api_uninstall))
         .route("/api/open_url", post(api_open_url))
         .route("/ws", get(ws_handler))
         .nest_service("/css", ServeDir::new(project_root.join("css")))
@@ -650,6 +651,38 @@ async fn api_update_apply() -> impl IntoResponse {
     match res {
         Ok(msg) => Json(json!({ "success": true, "message": msg })),
         Err(err) => Json(json!({ "success": false, "message": err })),
+    }
+}
+
+async fn api_uninstall() -> impl IntoResponse {
+    let root = resolve_project_root();
+    let uninstaller = root.join("unins000.exe");
+    if uninstaller.exists() {
+        let spawn_res = std::process::Command::new(&uninstaller).spawn();
+        match spawn_res {
+            Ok(_) => (
+                StatusCode::OK,
+                Json(json!({
+                    "success": true,
+                    "message": "アンインストーラーを起動しました。画面の指示に従って操作してください。"
+                })),
+            ),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "message": format!("アンインストーラーの起動に失敗しました: {}", e)
+                })),
+            ),
+        }
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "success": false,
+                "message": "インストーラー形式でインストールされた環境 (unins000.exe) が見つかりませんでした。Windowsの「設定」>「インストールされているアプリ」を確認してください。"
+            })),
+        )
     }
 }
 
