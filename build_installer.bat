@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-echo Altair Module System Control - インストーラー作成バッチ
+echo Altair_module_system_control - インストーラー作成バッチ
 echo.
 
 echo [1/3] リリースバイナリをビルド中...

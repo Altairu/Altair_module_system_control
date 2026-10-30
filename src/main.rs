@@ -23,11 +23,11 @@ fn main() {
 
     let app_state = rt
         .block_on(server::start_altair_server(port))
-        .expect("Altairバックエンドサーバーの起動に失敗しました");
+        .expect("Altair_module_system_control のバックエンドサーバー起動に失敗しました");
 
     if headless {
         println!(
-            "Altair Control Server running in headless mode on http://127.0.0.1:{}",
+            "Altair_module_system_control running in headless mode on http://127.0.0.1:{}",
             port
         );
         rt.block_on(async {

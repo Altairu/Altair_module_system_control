@@ -134,7 +134,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: "Altair Module System Control ${{ steps.ver.outputs.tag }}"
+          name: "Altair_module_system_control ${{ steps.ver.outputs.tag }}"
           files: |
             altair_module_system_control-*-x86_64-pc-windows-msvc.zip
             target/release/altair_module_system_control.exe

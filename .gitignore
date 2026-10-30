@@ -4,5 +4,4 @@ __pycache__/
 *.pyc
 network_config.json
 .DS_Store
-*_setup.exe
 *.zip

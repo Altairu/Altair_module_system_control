@@ -1,4 +1,4 @@
-# Altair Module System Control v2
+# Altair_module_system_control
 
 Altair Module System の各モジュールを Windows 11 上の軽量ネイティブアプリケーションとして制御するための統合制御システムです。
 Node.js や npm、ROS2 環境を必要とせず、Rust と Tauri v2 によってコンパイルされた単一の実行ファイル `altair_module_system_control.exe` で最新の Ethernet-CAN 変換基板および USB-to-CAN アダプタによる 100Hz 制御や、Blockly / Python による自動制御プログラムの実行が可能です。
@@ -31,7 +31,7 @@ flowchart LR
 
 * GitHub Releases の最新リリースから `altair_module_system_control_setup.exe` をダウンロードします。
 * ダウンロードしたインストーラーを実行します。管理者権限は不要で、そのままウィザードに従って進めるだけでインストールが完了します。
-* デスクトップまたはスタートメニューに作成された `Altair Module System Control` のショートカットから起動できます。
+* デスクトップまたはスタートメニューに作成された `Altair_module_system_control` のショートカットから起動できます。
 * アプリの更新は起動時に自動確認され、画面上のボタンから最新バージョンへそのまま更新できます。
 
 

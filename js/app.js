@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Altair Web Controller v2 - フロントエンド メイン JavaScript
+   Altair_module_system_control - フロントエンド メイン JavaScript
    機能: ビュー切り替え, REST API通信, WebSocket双方向通信, 動的カード描画, プロファイル管理
    ========================================================================== */
 
@@ -1572,7 +1572,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (btnAppUninstall) {
     btnAppUninstall.addEventListener("click", async () => {
-      if (!confirm("Altair Module System Control をアンインストールしますか？\nWindowsのアンインストーラーを起動します。")) {
+      if (!confirm("Altair_module_system_control をアンインストールしますか？\nWindowsのアンインストーラーを起動します。")) {
         return;
       }
       try {
@@ -1641,7 +1641,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.current_version) {
         const vText = `v${data.current_version}`;
         if (lblAppVersion) lblAppVersion.textContent = vText;
-        if (lblSidebarVersion) lblSidebarVersion.textContent = `Altair Control ${vText}`;
+        if (lblSidebarVersion) lblSidebarVersion.textContent = `Altair_module_system_control ${vText}`;
         if (lblAboutVer) lblAboutVer.textContent = vText;
         if (lblModalCurVer) lblModalCurVer.textContent = vText;
       }

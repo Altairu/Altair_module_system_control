@@ -1,7 +1,7 @@
-; Altair Module System Control - Inno Setup Installer Script
+; Altair_module_system_control - Inno Setup Installer Script
 ; Windows向けワンクリックインストーラー定義
 
-#define MyAppName "Altair Module System Control"
+#define MyAppName "Altair_module_system_control"
 #ifndef MyAppVersion
 #define MyAppVersion "2.0.5"
 #endif
@@ -17,7 +17,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={localappdata}\Programs\Altair_Module_System_Control
+DefaultDirName={localappdata}\Programs\Altair_module_system_control
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=.

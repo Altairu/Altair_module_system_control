@@ -1,6 +1,6 @@
 # 今後の拡張と課題 (Future Plans & Known Issues)
 
-Altair Web Controller の将来的な拡張アイデアおよび現状確認されている技術的な課題についてのまとめです。
+Altair_module_system_control の将来的な拡張アイデアおよび現状確認されている技術的な課題についてのまとめです。
 
 ## 1. 既存の技術的課題 (Known Issues)
 

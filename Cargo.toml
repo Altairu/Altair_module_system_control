@@ -1,7 +1,7 @@
 [package]
 name = "altair_module_system_control"
 version = "2.0.5"
-description = "Altair Module System Control v2 - Rust & Tauri v2 Desktop App"
+description = "Altair_module_system_control"
 authors = ["Altair"]
 edition = "2021"
 
