@@ -143,16 +143,16 @@
             <!-- USB-to-CAN 接続フォーム -->
             <div id="panel-conn-usb" class="connection-controls" style="display: none;">
               <label class="toggle-checkbox" style="margin-bottom: 6px;">
-                <input type="checkbox" id="chk-auto-connect" checked>
+                <input type="checkbox" id="chk-auto-connect">
                 <span class="toggle-switch"></span>
                 <span class="toggle-label">Auto Connect</span>
               </label>
 
               <div class="port-select-row" style="margin-bottom: 8px;">
-                <select id="sel-can-port" class="form-input" disabled>
+                <select id="sel-can-port" class="form-input">
                   <option value="">ポートを検出中...</option>
                 </select>
-                <button class="btn btn-secondary btn-icon" id="btn-refresh-ports" disabled title="ポート再検出">
+                <button class="btn btn-secondary btn-icon" id="btn-refresh-ports" title="ポート再検出">
                   <i class="fa-solid fa-arrows-rotate"></i>
                 </button>
               </div>

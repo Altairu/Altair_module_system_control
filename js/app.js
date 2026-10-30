@@ -1006,11 +1006,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // 自動探索チェックボックスの挙動
-  el.chkAutoConnect.addEventListener("change", (e) => {
-    const isAuto = e.target.checked;
-    el.selCanPort.disabled = isAuto;
-    el.btnRefreshPorts.disabled = isAuto;
-  });
+  if (el.chkAutoConnect) {
+    const syncAutoConnectUI = () => {
+      const isAuto = el.chkAutoConnect.checked;
+      if (el.selCanPort) el.selCanPort.disabled = isAuto;
+      if (el.btnRefreshPorts) el.btnRefreshPorts.disabled = isAuto;
+    };
+    el.chkAutoConnect.addEventListener("change", syncAutoConnectUI);
+    syncAutoConnectUI();
+  }
 
   // 接続ボタン
   el.btnConnectCan.addEventListener("click", async () => {
