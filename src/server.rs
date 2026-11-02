@@ -18,7 +18,40 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
+
+// ビルド時にexeへ埋め込むUIファイル
+const INDEX_HTML: &str = include_str!("../index.html");
+const STYLES_CSS: &str = include_str!("../css/styles.css");
+const APP_JS: &str = include_str!("../js/app.js");
+const GAMEPAD_JS: &str = include_str!("../js/gamepad.js");
+
+/// 埋め込みファイルをキャッシュ無効で返す
+fn embedded_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+}
+
+async fn serve_index_html() -> impl IntoResponse {
+    embedded_response("text/html; charset=utf-8", INDEX_HTML)
+}
+
+async fn serve_styles_css() -> impl IntoResponse {
+    embedded_response("text/css; charset=utf-8", STYLES_CSS)
+}
+
+async fn serve_app_js() -> impl IntoResponse {
+    embedded_response("application/javascript; charset=utf-8", APP_JS)
+}
+
+async fn serve_gamepad_js() -> impl IntoResponse {
+    embedded_response("application/javascript; charset=utf-8", GAMEPAD_JS)
+}
 
 use crate::behavior_runner::BehaviorRunner;
 use crate::eth_can_bridge::EthCanBridge;
@@ -224,10 +257,14 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/system/uninstall", post(api_uninstall))
         .route("/api/open_url", post(api_open_url))
         .route("/ws", get(ws_handler))
-        .nest_service("/css", ServeDir::new(project_root.join("css")))
-        .nest_service("/js", ServeDir::new(project_root.join("js")))
+        // UIファイルはexeに埋め込んで配信する
+        // self_updateはexeしか置き換えないため、ディスク上のファイルを配信すると更新後も古い画面のままになる
+        .route("/", get(serve_index_html))
+        .route("/index.html", get(serve_index_html))
+        .route("/css/styles.css", get(serve_styles_css))
+        .route("/js/app.js", get(serve_app_js))
+        .route("/js/gamepad.js", get(serve_gamepad_js))
         .nest_service("/docs", ServeDir::new(project_root.join("docs")))
-        .route_service("/", ServeFile::new(project_root.join("index.html")))
         .with_state(state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
