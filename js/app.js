@@ -68,7 +68,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // システムログ関連
     canLogsTerminal: document.getElementById("can-logs-terminal"),
+    canLogsTxTerminal: document.getElementById("can-logs-tx-terminal"),
+    canLogsRxTerminal: document.getElementById("can-logs-rx-terminal"),
+    canStreamContainer: document.getElementById("can-stream-container"),
+    canStreamPanelTx: document.getElementById("can-stream-panel-tx"),
+    canStreamPanelRx: document.getElementById("can-stream-panel-rx"),
+    canStreamPanelAll: document.getElementById("can-stream-panel-all"),
+    canSummaryTbody: document.getElementById("can-summary-tbody"),
+    canStatTxCount: document.getElementById("can-stat-tx-count"),
+    canStatRxCount: document.getElementById("can-stat-rx-count"),
+    canStatIdCount: document.getElementById("can-stat-id-count"),
+    canFilterDirGroup: document.getElementById("can-filter-dir-group"),
+    canFilterIdSelect: document.getElementById("can-filter-id-select"),
+    canFilterSearch: document.getElementById("can-filter-search"),
+    canViewModeGroup: document.getElementById("can-view-mode-group"),
+    btnPauseCanLogs: document.getElementById("btn-pause-can-logs"),
     btnClearCanLogs: document.getElementById("btn-clear-can-logs"),
+    btnResetIdFilter: document.getElementById("btn-reset-id-filter"),
 
     // モジュール追加モーダル
     modal: document.getElementById("add-module-modal"),
@@ -238,15 +254,445 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- 6. コンソールロギングヘルパー ---
-  function appendCanLog(text) {
-    if (!el.canLogsTerminal) return;
-    appendTerminalLog(el.canLogsTerminal, text);
+  // --- 6. コンソール ＆ CANアナライザ ロギングヘルパー ---
+  const canLogState = {
+    paused: false,
+    filterDir: "ALL",     // ALL | TX | RX
+    filterId: "ALL",      // ALL | 0x200 等 | モジュール名
+    searchQuery: "",
+    viewMode: "split",    // split | combined | table-only
+    txTotal: 0,
+    rxTotal: 0,
+    summaryMap: new Map(), // key: `${dir}_${idHex}`
+    knownIds: new Set(),
+    history: [],           // 直近フレーム履歴 (最大400件)
+    summaryDirty: false,
+  };
+
+  function readInt16LE(bytes, offset) {
+    if (bytes.length < offset + 2) return 0;
+    const val = (bytes[offset] & 0xFF) | ((bytes[offset + 1] & 0xFF) << 8);
+    return val >= 0x8000 ? val - 0x10000 : val;
   }
 
+  function resolveCanFrameInfo(idNum, bytes) {
+    const modules = state.config?.modules || [];
+    for (const m of modules) {
+      const baseId = parseInt(m.base_id, 16);
+      if (isNaN(baseId)) continue;
+
+      if (m.type === "mdd") {
+        if (idNum >= baseId && idNum <= baseId + 3) {
+          const ch = idNum - baseId + 1;
+          let decoded = "";
+          if (bytes.length >= 8) {
+            const p = (readInt16LE(bytes, 0) / 1000).toFixed(2);
+            const i = (readInt16LE(bytes, 2) / 1000).toFixed(2);
+            const d = (readInt16LE(bytes, 4) / 1000).toFixed(2);
+            const dia = (readInt16LE(bytes, 6) / 10).toFixed(0);
+            decoded = `P:${p} I:${i} D:${d} 径:${dia}mm`;
+          }
+          return { moduleName: m.name, label: `${m.name} / PID設定(M${ch})`, decoded };
+        }
+        if (idNum === baseId + 0x10) {
+          const modeNames = ["Speed", "Angle", "Pos"];
+          const modes = bytes.slice(0, 4).map((b, idx) => `M${idx + 1}:${modeNames[b] || b}`).join(" ");
+          return { moduleName: m.name, label: `${m.name} / モード・起動`, decoded: modes };
+        }
+        if (idNum === baseId + 0x20) {
+          let decoded = "";
+          if (bytes.length >= 8) {
+            const vals = [0, 1, 2, 3].map(idx => `M${idx + 1}:${(readInt16LE(bytes, idx * 2) / 10).toFixed(1)}`);
+            decoded = vals.join(" ");
+          }
+          return { moduleName: m.name, label: `${m.name} / 目標値指令`, decoded };
+        }
+        if (idNum === baseId + 0x30) {
+          let decoded = "";
+          if (bytes.length >= 6) {
+            const st = bytes[5] === 1 ? "制御中(1)" : "待機中(0)";
+            const err = `0x${bytes[4].toString(16).padStart(2, "0").toUpperCase()}`;
+            const sw = `${bytes[0] ? 1 : 0}${bytes[1] ? 1 : 0}${bytes[2] ? 1 : 0}${bytes[3] ? 1 : 0}`;
+            decoded = `状態:${st} Err:${err} SW:${sw}`;
+          }
+          return { moduleName: m.name, label: `${m.name} / ステータス返信`, decoded };
+        }
+        if (idNum === baseId + 0x40) {
+          let decoded = "";
+          if (bytes.length >= 8) {
+            const angs = [0, 1, 2, 3].map(idx => `M${idx + 1}:${(readInt16LE(bytes, idx * 2) / 10).toFixed(1)}°`);
+            decoded = angs.join(" ");
+          }
+          return { moduleName: m.name, label: `${m.name} / 現在角度FB`, decoded };
+        }
+        if (idNum === baseId + 0x50) {
+          let decoded = "";
+          if (bytes.length >= 8) {
+            const spds = [0, 1, 2, 3].map(idx => `M${idx + 1}:${(readInt16LE(bytes, idx * 2) / 100).toFixed(2)}`);
+            decoded = `${spds.join(" ")} rps`;
+          }
+          return { moduleName: m.name, label: `${m.name} / 現在速度FB`, decoded };
+        }
+      } else if (m.type === "servo" && idNum === baseId) {
+        const angs = bytes.slice(0, 6).map((b, idx) => `S${idx + 1}:${b}°`).join(" ");
+        return { moduleName: m.name, label: `${m.name} / サーボ指令`, decoded: angs };
+      } else if (m.type === "solenoid" && idNum === baseId) {
+        const bits = (bytes[0] || 0) | ((bytes[1] || 0) << 8);
+        const onList = [];
+        for (let i = 0; i < 12; i++) {
+          if (bits & (1 << i)) onList.push(`V${i + 1}`);
+        }
+        return {
+          moduleName: m.name,
+          label: `${m.name} / 電磁弁指令`,
+          decoded: onList.length > 0 ? `ON: ${onList.join(",")}` : "すべてOFF",
+        };
+      }
+    }
+
+    return { moduleName: "", label: "未登録ID", decoded: "" };
+  }
+
+  function parseRawCanLogLine(text) {
+    const m = text.match(/^\[(TX|RX)\]\s*\(([^)]+)\)\s*ID:\s*(0x[0-9A-Fa-f]+)\s*\[(\d+)\]\s*(.*)$/);
+    if (!m) return null;
+    const dir = m[1];
+    const channel = m[2];
+    const idNum = parseInt(m[3], 16);
+    const idHex = `0x${idNum.toString(16).toUpperCase().padStart(3, "0")}`;
+    const dlc = parseInt(m[4], 10);
+    const hexTokens = m[5].trim() ? m[5].trim().split(/\s+/) : [];
+    const bytes = hexTokens.map(h => parseInt(h, 16) || 0);
+    const timeStr = new Date().toLocaleTimeString();
+    const info = resolveCanFrameInfo(idNum, bytes);
+
+    return {
+      dir,
+      channel,
+      idHex,
+      idNum,
+      dlc,
+      hexTokens,
+      bytes,
+      timeStr,
+      moduleName: info.moduleName,
+      label: info.label,
+      decoded: info.decoded,
+    };
+  }
+
+  function matchesCanFilter(entry) {
+    if (canLogState.filterDir !== "ALL" && entry.dir !== canLogState.filterDir) {
+      return false;
+    }
+    if (canLogState.filterId !== "ALL") {
+      if (canLogState.filterId.startsWith("MOD:")) {
+        const targetMod = canLogState.filterId.slice(4);
+        if (entry.moduleName !== targetMod) return false;
+      } else if (entry.idHex !== canLogState.filterId) {
+        return false;
+      }
+    }
+    if (canLogState.searchQuery) {
+      const q = canLogState.searchQuery.toLowerCase();
+      const hay = `${entry.idHex} ${entry.label} ${entry.decoded} ${entry.hexTokens.join(" ")}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }
+
+  function updateCanFilterSelectOptions() {
+    if (!el.canFilterIdSelect) return;
+    const currentVal = el.canFilterIdSelect.value;
+    const modules = state.config?.modules || [];
+
+    let html = '<option value="ALL">すべてのID / モジュール</option>';
+    if (modules.length > 0) {
+      html += '<optgroup label="モジュール別">';
+      modules.forEach(m => {
+        html += `<option value="MOD:${m.name}">${m.name} (${m.base_id})</option>`;
+      });
+      html += "</optgroup>";
+    }
+
+    const sortedIds = Array.from(canLogState.knownIds).sort((a, b) => parseInt(a, 16) - parseInt(b, 16));
+    if (sortedIds.length > 0) {
+      html += '<optgroup label="CAN ID別">';
+      sortedIds.forEach(idHex => {
+        const info = resolveCanFrameInfo(parseInt(idHex, 16), []);
+        const suffix = info.label && info.label !== "未登録ID" ? ` - ${info.label}` : "";
+        html += `<option value="${idHex}">${idHex}${suffix}</option>`;
+      });
+      html += "</optgroup>";
+    }
+
+    el.canFilterIdSelect.innerHTML = html;
+    if ([...el.canFilterIdSelect.options].some(o => o.value === currentVal)) {
+      el.canFilterIdSelect.value = currentVal;
+    } else {
+      el.canFilterIdSelect.value = "ALL";
+    }
+  }
+
+  function renderCanStreamRow(entry) {
+    const div = document.createElement("div");
+    div.className = "can-log-row";
+    const dirClass = entry.dir === "TX" ? "can-log-dir-tx" : "can-log-dir-rx";
+    const hexStr = entry.hexTokens.join(" ");
+    const decStr = entry.decoded ? ` | ${entry.decoded}` : "";
+    div.innerHTML = `
+      <span class="can-log-time">[${entry.timeStr}]</span>
+      <span class="${dirClass}">${entry.dir}</span>
+      <span class="can-log-id">${entry.idHex}</span>
+      <span class="can-log-label" title="${entry.label}">${entry.label}</span>
+      <span class="can-log-data">[${entry.dlc}] ${hexStr}${decStr}</span>
+    `;
+    return div;
+  }
+
+  function appendStreamRowToTerminal(terminal, entry) {
+    if (!terminal) return;
+    terminal.appendChild(renderCanStreamRow(entry));
+    while (terminal.childElementCount > 200) {
+      terminal.removeChild(terminal.firstChild);
+    }
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function rebuildCanStreamTerminals() {
+    if (el.canLogsTerminal) el.canLogsTerminal.innerHTML = "";
+    if (el.canLogsTxTerminal) el.canLogsTxTerminal.innerHTML = "";
+    if (el.canLogsRxTerminal) el.canLogsRxTerminal.innerHTML = "";
+
+    for (const entry of canLogState.history) {
+      if (!matchesCanFilter(entry)) continue;
+      appendStreamRowToTerminal(el.canLogsTerminal, entry);
+      if (entry.dir === "TX") {
+        appendStreamRowToTerminal(el.canLogsTxTerminal, entry);
+      } else {
+        appendStreamRowToTerminal(el.canLogsRxTerminal, entry);
+      }
+    }
+  }
+
+  function renderCanSummaryTable() {
+    if (!el.canSummaryTbody) return;
+    const items = Array.from(canLogState.summaryMap.values())
+      .filter(matchesCanFilter)
+      .sort((a, b) => {
+        if (a.idNum !== b.idNum) return a.idNum - b.idNum;
+        return a.dir.localeCompare(b.dir);
+      });
+
+    if (items.length === 0) {
+      el.canSummaryTbody.innerHTML = `
+        <tr class="can-empty-row">
+          <td colspan="7">条件に一致するCANフレームはまだありません。</td>
+        </tr>`;
+      return;
+    }
+
+    el.canSummaryTbody.innerHTML = items.map(item => {
+      const dirBadge = item.dir === "TX"
+        ? '<span class="can-dir-badge can-dir-tx">TX</span>'
+        : '<span class="can-dir-badge can-dir-rx">RX</span>';
+      const isSelected = canLogState.filterId === item.idHex ? "selected-id-row" : "";
+      const bytesHtml = item.hexTokens.map((hx, idx) => {
+        const changed = item.prevHexTokens && item.prevHexTokens[idx] !== undefined && item.prevHexTokens[idx] !== hx;
+        return `<span class="can-hex-byte ${changed ? "changed" : ""}">${hx}</span>`;
+      }).join("");
+
+      return `
+        <tr class="${isSelected}" data-can-id="${item.idHex}" title="クリックでこのCAN ID (${item.idHex}) を絞り込み">
+          <td>${dirBadge}</td>
+          <td><span class="can-id-badge">${item.idHex}</span></td>
+          <td style="font-weight: 500;">${item.label}</td>
+          <td style="text-align: center; font-family: 'Consolas', monospace;">${item.dlc}</td>
+          <td><div class="can-hex-bytes">${bytesHtml}</div></td>
+          <td><span class="can-decoded-text">${item.decoded || "-"}</span></td>
+          <td style="text-align: right; font-family: 'Consolas', monospace; font-size: 11px; color: var(--text-muted);">
+            <strong>${item.count}</strong>回<br>${item.timeStr}
+          </td>
+        </tr>`;
+    }).join("");
+  }
+
+  function updateCanViewLayout() {
+    if (!el.canStreamContainer) return;
+    if (canLogState.viewMode === "table-only") {
+      el.canStreamContainer.style.display = "none";
+    } else if (canLogState.viewMode === "combined") {
+      el.canStreamContainer.style.display = "block";
+      el.canStreamContainer.className = "can-stream-combined mt-3";
+      if (el.canStreamPanelTx) el.canStreamPanelTx.style.display = "none";
+      if (el.canStreamPanelRx) el.canStreamPanelRx.style.display = "none";
+      if (el.canStreamPanelAll) el.canStreamPanelAll.style.display = "block";
+    } else {
+      el.canStreamContainer.style.display = "grid";
+      el.canStreamContainer.className = "can-stream-split mt-3";
+      if (el.canStreamPanelTx) el.canStreamPanelTx.style.display = canLogState.filterDir === "RX" ? "none" : "block";
+      if (el.canStreamPanelRx) el.canStreamPanelRx.style.display = canLogState.filterDir === "TX" ? "none" : "block";
+      if (el.canStreamPanelAll) el.canStreamPanelAll.style.display = "none";
+    }
+  }
+
+  function appendCanLog(text) {
+    if (canLogState.paused) return;
+
+    const entry = parseRawCanLogLine(text);
+    if (!entry) {
+      if (el.canLogsTerminal) appendTerminalLog(el.canLogsTerminal, text);
+      return;
+    }
+
+    if (entry.dir === "TX") {
+      canLogState.txTotal++;
+      if (el.canStatTxCount) el.canStatTxCount.textContent = canLogState.txTotal;
+    } else {
+      canLogState.rxTotal++;
+      if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
+    }
+
+    if (!canLogState.knownIds.has(entry.idHex)) {
+      canLogState.knownIds.add(entry.idHex);
+      if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
+      updateCanFilterSelectOptions();
+    }
+
+    const key = `${entry.dir}_${entry.idHex}`;
+    const prev = canLogState.summaryMap.get(key);
+    canLogState.summaryMap.set(key, {
+      ...entry,
+      prevHexTokens: prev ? prev.hexTokens : null,
+      count: prev ? prev.count + 1 : 1,
+    });
+
+    canLogState.history.push(entry);
+    if (canLogState.history.length > 400) {
+      canLogState.history.shift();
+    }
+
+    if (matchesCanFilter(entry)) {
+      appendStreamRowToTerminal(el.canLogsTerminal, entry);
+      if (entry.dir === "TX") {
+        appendStreamRowToTerminal(el.canLogsTxTerminal, entry);
+      } else {
+        appendStreamRowToTerminal(el.canLogsRxTerminal, entry);
+      }
+    }
+
+    if (!canLogState.summaryDirty) {
+      canLogState.summaryDirty = true;
+      requestAnimationFrame(() => {
+        canLogState.summaryDirty = false;
+        renderCanSummaryTable();
+      });
+    }
+  }
+
+  // 送受信フィルタ切替イベント
+  if (el.canFilterDirGroup) {
+    el.canFilterDirGroup.addEventListener("click", (e) => {
+      const btn = e.target.closest(".can-seg-btn");
+      if (!btn) return;
+      el.canFilterDirGroup.querySelectorAll(".can-seg-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      canLogState.filterDir = btn.getAttribute("data-dir") || "ALL";
+      updateCanViewLayout();
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
+    });
+  }
+
+  // 表示モード切替イベント (送受信2分割 / 統合ストリーム / ID表のみ)
+  if (el.canViewModeGroup) {
+    el.canViewModeGroup.addEventListener("click", (e) => {
+      const btn = e.target.closest(".can-seg-btn");
+      if (!btn) return;
+      el.canViewModeGroup.querySelectorAll(".can-seg-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      canLogState.viewMode = btn.getAttribute("data-mode") || "split";
+      updateCanViewLayout();
+    });
+  }
+
+  // IDセレクト絞り込みイベント
+  if (el.canFilterIdSelect) {
+    el.canFilterIdSelect.addEventListener("change", () => {
+      canLogState.filterId = el.canFilterIdSelect.value;
+      if (el.btnResetIdFilter) {
+        el.btnResetIdFilter.style.display = canLogState.filterId === "ALL" ? "none" : "inline";
+      }
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
+    });
+  }
+
+  // テキスト検索絞り込みイベント
+  if (el.canFilterSearch) {
+    el.canFilterSearch.addEventListener("input", () => {
+      canLogState.searchQuery = el.canFilterSearch.value.trim();
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
+    });
+  }
+
+  // ID別モニター表の行クリックで特定CAN IDの絞り込みトグル
+  if (el.canSummaryTbody) {
+    el.canSummaryTbody.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-can-id]");
+      if (!tr) return;
+      const clickedId = tr.getAttribute("data-can-id");
+      canLogState.filterId = canLogState.filterId === clickedId ? "ALL" : clickedId;
+      if (el.canFilterIdSelect) el.canFilterIdSelect.value = canLogState.filterId;
+      if (el.btnResetIdFilter) {
+        el.btnResetIdFilter.style.display = canLogState.filterId === "ALL" ? "none" : "inline";
+      }
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
+    });
+  }
+
+  if (el.btnResetIdFilter) {
+    el.btnResetIdFilter.addEventListener("click", () => {
+      canLogState.filterId = "ALL";
+      if (el.canFilterIdSelect) el.canFilterIdSelect.value = "ALL";
+      el.btnResetIdFilter.style.display = "none";
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
+    });
+  }
+
+  // 一時停止 / 再開ボタン
+  if (el.btnPauseCanLogs) {
+    el.btnPauseCanLogs.addEventListener("click", () => {
+      canLogState.paused = !canLogState.paused;
+      if (canLogState.paused) {
+        el.btnPauseCanLogs.innerHTML = '<i class="fa-solid fa-play"></i> 再開';
+        el.btnPauseCanLogs.classList.add("btn-primary");
+        el.btnPauseCanLogs.classList.remove("btn-secondary");
+      } else {
+        el.btnPauseCanLogs.innerHTML = '<i class="fa-solid fa-pause"></i> 一時停止';
+        el.btnPauseCanLogs.classList.remove("btn-primary");
+        el.btnPauseCanLogs.classList.add("btn-secondary");
+      }
+    });
+  }
+
+  // クリアボタン
   if (el.btnClearCanLogs) {
     el.btnClearCanLogs.addEventListener("click", () => {
-      el.canLogsTerminal.innerHTML = '<div class="terminal-line system-msg">[SYSTEM] CANログをクリアしました。</div>';
+      canLogState.txTotal = 0;
+      canLogState.rxTotal = 0;
+      canLogState.summaryMap.clear();
+      canLogState.knownIds.clear();
+      canLogState.history = [];
+      if (el.canStatTxCount) el.canStatTxCount.textContent = "0";
+      if (el.canStatRxCount) el.canStatRxCount.textContent = "0";
+      if (el.canStatIdCount) el.canStatIdCount.textContent = "0";
+      updateCanFilterSelectOptions();
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
     });
   }
 
@@ -272,6 +718,7 @@ document.addEventListener("DOMContentLoaded", () => {
       state.config = await res.json();
 
       renderModuleCards();
+      updateCanFilterSelectOptions();
     } catch (err) {
       console.error("モジュール設定のロードに失敗しました:", err);
     }

@@ -1446,3 +1446,365 @@ body {
   flex-direction: column;
   gap: 12px;
 }
+
+/* --- 19. システム送受信 CAN ログ ビュー --- */
+.can-log-header-bar {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.can-log-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.can-stat-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-family: 'Consolas', monospace;
+}
+
+.can-stat-pill.stat-tx {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.can-stat-pill.stat-rx {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.can-stat-pill.stat-id {
+  background: var(--color-purple-light);
+  color: var(--color-purple);
+}
+
+.can-log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: #f8f9fa;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.can-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.can-toolbar-right {
+  margin-left: auto;
+}
+
+.can-toolbar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.can-segmented-group {
+  display: inline-flex;
+  background: #e8eaed;
+  padding: 2px;
+  border-radius: 8px;
+  gap: 2px;
+}
+
+.can-seg-btn {
+  border: none;
+  background: transparent;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.can-seg-btn:hover {
+  color: var(--text-main);
+}
+
+.can-seg-btn.active {
+  background: #ffffff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.can-filter-select {
+  height: 30px;
+  padding: 2px 8px;
+  font-size: 12px;
+  min-width: 170px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: #ffffff;
+}
+
+.can-filter-input {
+  height: 30px;
+  padding: 2px 10px;
+  font-size: 12px;
+  width: 185px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: #ffffff;
+}
+
+/* ID別ライブモニター表 */
+.can-summary-section {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.can-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #f8f9fa;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.can-section-title-row h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.btn-link-xs {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.can-summary-table-wrap {
+  max-height: 290px;
+  overflow-y: auto;
+}
+
+.can-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.can-summary-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f1f3f4;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-color);
+  z-index: 1;
+}
+
+.can-summary-table tbody tr {
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.can-summary-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+.can-summary-table tbody tr.selected-id-row {
+  background-color: var(--color-primary-light);
+}
+
+.can-summary-table td {
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+
+.can-empty-row td {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 20px;
+  cursor: default;
+}
+
+.can-dir-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: 'Consolas', monospace;
+  text-align: center;
+  min-width: 34px;
+}
+
+.can-dir-tx {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.can-dir-rx {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.can-id-badge {
+  display: inline-block;
+  font-family: 'Consolas', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--color-purple);
+  background: var(--color-purple-light);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.can-hex-bytes {
+  display: inline-flex;
+  gap: 3px;
+  font-family: 'Consolas', monospace;
+}
+
+.can-hex-byte {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #f1f3f4;
+  color: #202124;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.can-hex-byte.changed {
+  background: #fef7e0;
+  color: #b06000;
+  border: 1px solid #fbbc04;
+}
+
+.can-decoded-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'Consolas', var(--font-main);
+}
+
+/* 下段 ストリームパネル (2分割 / 統合) */
+.can-stream-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.can-stream-combined {
+  display: block;
+}
+
+@media (max-width: 1100px) {
+  .can-stream-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.can-stream-panel {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1e1e1e;
+}
+
+.can-stream-panel-header {
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.can-stream-panel-header.tx-header {
+  background: #172b4d;
+  color: #8ab4f8;
+  border-bottom: 1px solid #26406b;
+}
+
+.can-stream-panel-header.rx-header {
+  background: #133123;
+  color: #81c995;
+  border-bottom: 1px solid #1e4d37;
+}
+
+.can-stream-panel-header.all-header {
+  background: #282a2d;
+  color: #e8eaed;
+  border-bottom: 1px solid #3c4043;
+}
+
+.can-terminal {
+  height: 320px;
+  border-radius: 0;
+  border: none;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.can-log-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-family: 'Consolas', monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.can-log-time {
+  color: #9aa0a6;
+  font-size: 11px;
+}
+
+.can-log-dir-tx {
+  color: #8ab4f8;
+  font-weight: 700;
+}
+
+.can-log-dir-rx {
+  color: #81c995;
+  font-weight: 700;
+}
+
+.can-log-id {
+  color: #d7aefb;
+  font-weight: 700;
+}
+
+.can-log-label {
+  color: #fdd663;
+  font-size: 11px;
+  min-width: 125px;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.can-log-data {
+  color: #e8eaed;
+  letter-spacing: 0.3px;
+}

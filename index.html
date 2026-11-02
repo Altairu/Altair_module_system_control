@@ -504,13 +504,108 @@
       <!-- ビュー: Logs -->
       <section id="view-logs" class="content-view">
         <div class="glass-card page-card">
-          <div class="console-header">
-            <h2><i class="fa-solid fa-receipt"></i> システム送受信 CAN ログ</h2>
-            <button class="btn btn-secondary btn-sm" id="btn-clear-can-logs">Clear Logs</button>
+          <div class="console-header can-log-header-bar">
+            <div>
+              <h2><i class="fa-solid fa-receipt"></i> システム送受信 CAN ログ</h2>
+              <p class="mt-1">ID別の最新状態モニターおよび送受信別のリアルタイムストリームを確認できます。</p>
+            </div>
+            <div class="can-log-stats">
+              <span class="can-stat-pill stat-tx">TX: <strong id="can-stat-tx-count">0</strong></span>
+              <span class="can-stat-pill stat-rx">RX: <strong id="can-stat-rx-count">0</strong></span>
+              <span class="can-stat-pill stat-id">ID数: <strong id="can-stat-id-count">0</strong></span>
+            </div>
           </div>
-          <p>Ethernet-CAN / USB-to-CAN 経由で送受信される raw CAN フレームをリアルタイムで表示します。</p>
-          <div class="terminal-view" id="can-logs-terminal" style="height: 500px;">
-            <!-- CANログが流れます -->
+
+          <!-- フィルタ ＆ 表示切替ツールバー -->
+          <div class="can-log-toolbar mt-3">
+            <!-- 送受信フィルタ -->
+            <div class="can-toolbar-group">
+              <span class="can-toolbar-label">方向:</span>
+              <div class="can-segmented-group" id="can-filter-dir-group">
+                <button type="button" class="can-seg-btn active" data-dir="ALL">すべて</button>
+                <button type="button" class="can-seg-btn" data-dir="TX">TX (送信のみ)</button>
+                <button type="button" class="can-seg-btn" data-dir="RX">RX (受信のみ)</button>
+              </div>
+            </div>
+
+            <!-- ID / モジュール絞り込み -->
+            <div class="can-toolbar-group">
+              <span class="can-toolbar-label">ID絞込:</span>
+              <select class="form-input form-input-sm can-filter-select" id="can-filter-id-select">
+                <option value="ALL">すべてのID / モジュール</option>
+              </select>
+              <input type="text" class="form-input form-input-sm can-filter-input" id="can-filter-search" placeholder="例: 0x200, MDD1, ステータス">
+            </div>
+
+            <!-- レイアウト切替 & 操作 -->
+            <div class="can-toolbar-group can-toolbar-right">
+              <div class="can-segmented-group" id="can-view-mode-group">
+                <button type="button" class="can-seg-btn active" data-mode="split">送受信2分割</button>
+                <button type="button" class="can-seg-btn" data-mode="combined">統合ストリーム</button>
+                <button type="button" class="can-seg-btn" data-mode="table-only">ID表のみ</button>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-pause-can-logs">
+                <i class="fa-solid fa-pause"></i> 一時停止
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-can-logs">
+                <i class="fa-solid fa-trash-can"></i> クリア
+              </button>
+            </div>
+          </div>
+
+          <!-- 上段: ID別・送受信別 ライブモニター表 -->
+          <div class="can-summary-section mt-3">
+            <div class="can-section-title-row">
+              <h4><i class="fa-solid fa-table-list"></i> ID別・送受信別 ライブモニター (行クリックでID絞り込み)</h4>
+              <button type="button" class="btn-link-xs" id="btn-reset-id-filter" style="display: none;">絞り込み解除</button>
+            </div>
+            <div class="can-summary-table-wrap">
+              <table class="can-summary-table">
+                <thead>
+                  <tr>
+                    <th style="width: 64px;">方向</th>
+                    <th style="width: 82px;">CAN ID</th>
+                    <th style="width: 190px;">モジュール / 内容</th>
+                    <th style="width: 48px; text-align: center;">DLC</th>
+                    <th style="width: 220px;">最新データ (HEX)</th>
+                    <th>デコード値 / 状態解釈</th>
+                    <th style="width: 90px; text-align: right;">回数 / 時刻</th>
+                  </tr>
+                </thead>
+                <tbody id="can-summary-tbody">
+                  <tr class="can-empty-row">
+                    <td colspan="7">CANフレームを受信または送信すると、ここにID別の最新状態が一覧表示されます。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 下段: 時系列ストリームログ (送受信2分割 または 統合表示) -->
+          <div id="can-stream-container" class="can-stream-split mt-3">
+            <!-- TX ストリームパネル -->
+            <div class="can-stream-panel" id="can-stream-panel-tx">
+              <div class="can-stream-panel-header tx-header">
+                <span><i class="fa-solid fa-paper-plane"></i> 送信ストリーム (TX: PC ➔ マイコン)</span>
+              </div>
+              <div class="terminal-view can-terminal" id="can-logs-tx-terminal"></div>
+            </div>
+
+            <!-- RX ストリームパネル -->
+            <div class="can-stream-panel" id="can-stream-panel-rx">
+              <div class="can-stream-panel-header rx-header">
+                <span><i class="fa-solid fa-satellite-dish"></i> 受信ストリーム (RX: マイコン ➔ PC)</span>
+              </div>
+              <div class="terminal-view can-terminal" id="can-logs-rx-terminal"></div>
+            </div>
+
+            <!-- 統合ストリームパネル (統合モード時のみ表示) -->
+            <div class="can-stream-panel" id="can-stream-panel-all" style="display: none;">
+              <div class="can-stream-panel-header all-header">
+                <span><i class="fa-solid fa-bars-staggered"></i> 送受信統合ストリーム (TX / RX)</span>
+              </div>
+              <div class="terminal-view can-terminal" id="can-logs-terminal"></div>
+            </div>
           </div>
         </div>
       </section>
