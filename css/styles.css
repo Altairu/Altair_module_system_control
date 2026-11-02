@@ -558,10 +558,10 @@ body {
 }
 
 .module-card {
-  padding: 26px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 18px;
   position: relative;
   overflow: hidden;
 }
@@ -654,24 +654,220 @@ body {
   transform: scale(1.15);
 }
 
-/* MDDパラメータ編集テーブル */
+/* MDDパラメータ編集コンテナ & モーターカード */
 .mdd-params-table-wrapper {
   background: #f8f9fa;
-  padding: 14px;
+  padding: 12px;
   border-radius: 12px;
   border: 1px solid var(--border-color);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
-.mdd-params-table th, .mdd-params-table td {
-  padding: 5px 4px;
+
+.mdd-motors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.mdd-params-table select.form-input-sm, .mdd-params-table input.form-input-sm {
+
+.mdd-motor-card {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mdd-motor-card:hover {
+  border-color: #c2c8d0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* 上段ヘッダー部 (Ch, Mode, Wheel径, Dir) */
+.mdd-motor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.mdd-ch-badge {
+  background: var(--color-purple-light);
+  color: var(--color-purple);
+  font-weight: 700;
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.mdd-header-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mdd-field-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.mdd-field-unit {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.select-mdd-mode {
+  height: 24px;
+  padding: 0 4px;
+  font-size: 11px;
   border-radius: 4px;
   border: 1px solid var(--border-color);
-  background-color: #ffffff;
+  background-color: #fff;
+  cursor: pointer;
+  outline: none;
 }
-.mdd-params-table select.form-input-sm:focus, .mdd-params-table input.form-input-sm:focus {
+.select-mdd-mode:focus {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 1px var(--color-primary-light);
+}
+
+.input-mdd-wheel {
+  height: 24px;
+  width: 42px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-family: 'Consolas', monospace;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: #fff;
+  outline: none;
+}
+.input-mdd-wheel:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary-light);
+}
+
+.select-mdd-dir {
+  height: 24px;
+  width: 34px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: bold;
+  text-align: center;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: #fff;
+  cursor: pointer;
+  outline: none;
+}
+.select-mdd-dir:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary-light);
+}
+
+/* 下段 PID設定部 */
+.mdd-motor-pid-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.mdd-pid-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mdd-pid-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 9px;
+  text-align: center;
+}
+
+.mdd-stepper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: #fff;
+  overflow: hidden;
+  height: 24px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mdd-stepper:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary-light);
+}
+
+.btn-stepper {
+  width: 15px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  user-select: none;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.btn-stepper:hover {
+  background-color: #f1f3f4;
+  color: var(--text-main);
+}
+
+.btn-stepper:active {
+  background-color: #e8eaed;
+}
+
+.stepper-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  text-align: center;
+  font-size: 11px;
+  font-family: 'Consolas', monospace;
+  font-weight: 600;
+  color: var(--text-main);
+  padding: 0 2px;
+}
+
+/* スピンボタン非表示（数字入力欄の余白確保＆小数が隠れるのを防止） */
+.stepper-input::-webkit-outer-spin-button,
+.stepper-input::-webkit-inner-spin-button,
+.input-mdd-wheel::-webkit-outer-spin-button,
+.input-mdd-wheel::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.stepper-input, .input-mdd-wheel {
+  -moz-appearance: textfield;
 }
 
 /* MDD 反映パラメータ表示 */

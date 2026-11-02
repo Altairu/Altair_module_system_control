@@ -381,72 +381,72 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>`;
     }
 
-    // M1〜M4のパラメータ（モード, P, I, D, diameter, direction）編集テーブル
-    let paramsRowsHtml = "";
+    // M1〜M4のパラメータ（モード, P, I, D, diameter, direction）設定リスト
+    let paramsCardsHtml = "";
     for (let i = 1; i <= 4; i++) {
       const motorParam = mod.parameters?.[`m${i}`] ?? { mode: 0, p: 10.0, i: 0.0, d: 0.0, diameter: 100.0, direction: 1 };
-      paramsRowsHtml += `
-        <tr style="border-bottom: 1px solid var(--border-light);">
-          <td style="padding: 4px 0; font-weight: 500;">M${i}</td>
-          <td style="padding: 4px 0;">
-            <select class="form-input form-input-sm select-mdd-mode" data-module="${mod.name}" data-motor="${i}" style="padding: 2px 4px; font-size: 11px; height: 22px; width: 62px;">
-              <option value="0" ${motorParam.mode === 0 ? "selected" : ""}>Speed</option>
-              <option value="1" ${motorParam.mode === 1 ? "selected" : ""}>Angle</option>
-              <option value="2" ${motorParam.mode === 2 ? "selected" : ""}>Pos</option>
-            </select>
-          </td>
-          <td style="padding: 4px 0; text-align: center;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 2px;">
-              <button class="btn btn-secondary btn-xs btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="p" data-action="minus" style="padding: 0; width: 12px; height: 18px; font-size: 9px; line-height: 1;">-</button>
-              <input type="number" class="form-input form-input-sm input-mdd-p" data-module="${mod.name}" data-motor="${i}" step="0.1" value="${motorParam.p}" style="padding: 2px 0; font-size: 11px; height: 22px; width: 30px; text-align: center; display: inline-block; margin: 0;">
-              <button class="btn btn-secondary btn-xs btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="p" data-action="plus" style="padding: 0; width: 12px; height: 18px; font-size: 9px; line-height: 1;">+</button>
+      paramsCardsHtml += `
+        <div class="mdd-motor-card">
+          <!-- 上段: チャンネル, モード, 車輪径, 回転方向 -->
+          <div class="mdd-motor-header">
+            <span class="mdd-ch-badge">M${i}</span>
+            <div class="mdd-header-field mdd-mode-field">
+              <select class="form-input form-input-sm select-mdd-mode" data-module="${mod.name}" data-motor="${i}" title="制御モード">
+                <option value="0" ${motorParam.mode === 0 ? "selected" : ""}>Speed</option>
+                <option value="1" ${motorParam.mode === 1 ? "selected" : ""}>Angle</option>
+                <option value="2" ${motorParam.mode === 2 ? "selected" : ""}>Pos</option>
+              </select>
             </div>
-          </td>
-          <td style="padding: 4px 0; text-align: center;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 2px;">
-              <button class="btn btn-secondary btn-xs btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="i" data-action="minus" style="padding: 0; width: 12px; height: 18px; font-size: 9px; line-height: 1;">-</button>
-              <input type="number" class="form-input form-input-sm input-mdd-i" data-module="${mod.name}" data-motor="${i}" step="0.01" value="${motorParam.i}" style="padding: 2px 0; font-size: 11px; height: 22px; width: 30px; text-align: center; display: inline-block; margin: 0;">
-              <button class="btn btn-secondary btn-xs btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="i" data-action="plus" style="padding: 0; width: 12px; height: 18px; font-size: 9px; line-height: 1;">+</button>
+            <div class="mdd-header-field mdd-wheel-field">
+              <span class="mdd-field-label">径</span>
+              <input type="number" class="form-input form-input-sm input-mdd-wheel" data-module="${mod.name}" data-motor="${i}" step="1" value="${motorParam.diameter ?? 100.0}" title="車輪直径(mm)">
+              <span class="mdd-field-unit">mm</span>
             </div>
-          </td>
-          <td style="padding: 4px 0; text-align: center;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 2px;">
-              <button class="btn btn-secondary btn-xs btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="d" data-action="minus" style="padding: 0; width: 12px; height: 18px; font-size: 9px; line-height: 1;">-</button>
-              <input type="number" class="form-input form-input-sm input-mdd-d" data-module="${mod.name}" data-motor="${i}" step="0.01" value="${motorParam.d}" style="padding: 2px 0; font-size: 11px; height: 22px; width: 30px; text-align: center; display: inline-block; margin: 0;">
-              <button class="btn btn-secondary btn-xs btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="d" data-action="plus" style="padding: 0; width: 12px; height: 18px; font-size: 9px; line-height: 1;">+</button>
+            <div class="mdd-header-field mdd-dir-field">
+              <span class="mdd-field-label">Dir</span>
+              <select class="form-input form-input-sm select-mdd-dir" data-module="${mod.name}" data-motor="${i}" title="回転方向">
+                <option value="1" ${(motorParam.direction ?? 1) >= 0 ? "selected" : ""}>+</option>
+                <option value="-1" ${(motorParam.direction ?? 1) < 0 ? "selected" : ""}>-</option>
+              </select>
             </div>
-          </td>
-          <td style="padding: 4px 0; text-align: center;">
-            <input type="number" class="form-input form-input-sm input-mdd-wheel" data-module="${mod.name}" data-motor="${i}" step="1" value="${motorParam.diameter ?? 100.0}" style="padding: 2px 4px; font-size: 11px; height: 22px; width: 36px; text-align: center; display: inline-block; margin: 0;">
-          </td>
-          <td style="padding: 4px 0; text-align: center;">
-            <select class="form-input form-input-sm select-mdd-dir" data-module="${mod.name}" data-motor="${i}" style="padding: 2px 4px; font-size: 11px; height: 22px; width: 34px; text-align: center; display: inline-block; font-weight: bold;">
-              <option value="1" ${(motorParam.direction ?? 1) >= 0 ? "selected" : ""}>+</option>
-              <option value="-1" ${(motorParam.direction ?? 1) < 0 ? "selected" : ""}>-</option>
-            </select>
-          </td>
-        </tr>`;
+          </div>
+
+          <!-- 下段: PID設定ステッパー (P, I, D) -->
+          <div class="mdd-motor-pid-row">
+            <div class="mdd-pid-group">
+              <span class="mdd-pid-tag">P</span>
+              <div class="mdd-stepper">
+                <button type="button" class="btn-stepper btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="p" data-action="minus" title="P減少">-</button>
+                <input type="number" class="stepper-input input-mdd-p" data-module="${mod.name}" data-motor="${i}" step="0.1" value="${motorParam.p}" title="Pゲイン">
+                <button type="button" class="btn-stepper btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="p" data-action="plus" title="P増加">+</button>
+              </div>
+            </div>
+            <div class="mdd-pid-group">
+              <span class="mdd-pid-tag">I</span>
+              <div class="mdd-stepper">
+                <button type="button" class="btn-stepper btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="i" data-action="minus" title="I減少">-</button>
+                <input type="number" class="stepper-input input-mdd-i" data-module="${mod.name}" data-motor="${i}" step="0.01" value="${motorParam.i}" title="Iゲイン">
+                <button type="button" class="btn-stepper btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="i" data-action="plus" title="I増加">+</button>
+              </div>
+            </div>
+            <div class="mdd-pid-group">
+              <span class="mdd-pid-tag">D</span>
+              <div class="mdd-stepper">
+                <button type="button" class="btn-stepper btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="d" data-action="minus" title="D減少">-</button>
+                <input type="number" class="stepper-input input-mdd-d" data-module="${mod.name}" data-motor="${i}" step="0.01" value="${motorParam.d}" title="Dゲイン">
+                <button type="button" class="btn-stepper btn-pid-adjust" data-module="${mod.name}" data-motor="${i}" data-param="d" data-action="plus" title="D増加">+</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
     }
 
     const paramTableHtml = `
       <div class="mdd-params-table-wrapper mt-3">
-        <h4 style="font-size: 12px; margin-bottom: 6px; font-weight: 600;"><i class="fa-solid fa-gears"></i> PID & Mode Settings</h4>
-        <table class="mdd-params-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
-          <thead>
-            <tr style="border-bottom: 1px solid var(--border-light); text-align: left; color: var(--text-muted);">
-              <th style="padding-bottom: 4px; width: 8%;">Ch</th>
-              <th style="padding-bottom: 4px; width: 22%;">Mode</th>
-              <th style="padding-bottom: 4px; text-align: center; width: 14%;">P</th>
-              <th style="padding-bottom: 4px; text-align: center; width: 14%;">I</th>
-              <th style="padding-bottom: 4px; text-align: center; width: 14%;">D</th>
-              <th style="padding-bottom: 4px; text-align: center; width: 16%;">Wheel</th>
-              <th style="padding-bottom: 4px; text-align: center; width: 12%;">Dir</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${paramsRowsHtml}
-          </tbody>
-        </table>
+        <h4 style="font-size: 12px; margin-bottom: 8px; font-weight: 600;"><i class="fa-solid fa-gears"></i> PID & Mode Settings</h4>
+        <div class="mdd-motors-list">
+          ${paramsCardsHtml}
+        </div>
       </div>`;
 
     return `
