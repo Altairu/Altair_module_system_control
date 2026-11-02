@@ -31,9 +31,11 @@ struct ManagerInner {
     servo_angles: HashMap<String, [u8; 6]>,
     solenoid_valves: HashMap<String, [bool; 12]>,
     mdd_feedback_cache: HashMap<u16, MddFeedbackData>,
+    mdd_param_sent_at: HashMap<u16, Instant>,
+    mdd_param_confirmed: HashMap<u16, bool>,
+    send_session_id: u64,
     is_running: bool,
     is_sending_params: bool,
-    control_start_time: Instant,
 }
 
 /// Altair Module Manager
@@ -60,9 +62,11 @@ impl ModuleManager {
                 servo_angles: HashMap::new(),
                 solenoid_valves: HashMap::new(),
                 mdd_feedback_cache: HashMap::new(),
+                mdd_param_sent_at: HashMap::new(),
+                mdd_param_confirmed: HashMap::new(),
+                send_session_id: 0,
                 is_running: false,
                 is_sending_params: false,
-                control_start_time: Instant::now() - Duration::from_secs(10),
             })),
             send_can_fn,
             ws_tx,
@@ -180,6 +184,9 @@ impl ModuleManager {
     pub fn emergency_stop_all(&self) {
         let modules = {
             let mut g = self.inner.lock().unwrap();
+            g.is_sending_params = false;
+            g.is_running = false;
+            g.send_session_id = g.send_session_id.wrapping_add(1);
             let mods = g.config.modules.clone();
             for m in &mods {
                 if m.module_type == "mdd" {
@@ -203,83 +210,249 @@ impl ModuleManager {
         }
     }
 
-    /// パラメータ一括送信 ＆ 制御実行モード遷移 (Send Params & Start)
-    pub async fn start_control(&self) -> Result<String, String> {
-        let modules = {
-            let mut g = self.inner.lock().unwrap();
-            g.is_sending_params = true;
-            g.config.modules.clone()
-        };
-
-        for m in modules {
-            if m.module_type != "mdd" {
-                continue;
-            }
-            let Some(base_id) = parse_hex_id(&m.base_id) else {
-                continue;
-            };
-            let params = m.parameters.unwrap_or_default();
-
-            // 1. M1〜M4のPIDゲインおよび車輪径の送信 (Base ID + 0x00 .. 0x03)
-            for idx in 0..4u16 {
-                let key = format!("m{}", idx + 1);
-                let mp = params.get(&key).cloned().unwrap_or_else(MotorParam::default);
-
-                let dir_val: f64 = if mp.direction >= 0 { 1.0 } else { -1.0 };
-
-                // P, I, D は 1000倍、Diameter は 10倍して int16_t リトルエンディアンにパック
-                let p_int = (mp.p * 1000.0 * dir_val).trunc();
-                let i_int = (mp.i * 1000.0 * dir_val).trunc();
-                let d_int = (mp.d * 1000.0 * dir_val).trunc();
-                let dia_int = (mp.diameter * 10.0).trunc();
-
-                let mut payload = [0u8; 8];
-                payload[0..2].copy_from_slice(&encode_int16_le(p_int));
-                payload[2..4].copy_from_slice(&encode_int16_le(i_int));
-                payload[4..6].copy_from_slice(&encode_int16_le(d_int));
-                payload[6..8].copy_from_slice(&encode_int16_le(dia_int));
-
-                (self.send_can_fn)(base_id + idx, &payload, "can1");
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-
-            // 2. 4chの制御モード一括送信とシステム起動トリガ (Base ID + 0x10 = 0x210)
-            let mut mode_payload = [0u8; 4];
-            for idx in 0..4usize {
-                let key = format!("m{}", idx + 1);
-                let mp = params.get(&key).cloned().unwrap_or_else(MotorParam::default);
-                mode_payload[idx] = mp.mode;
-            }
-            (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1");
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-
-        let feedback_notifications = {
-            let mut g = self.inner.lock().unwrap();
-            g.control_start_time = Instant::now();
-            g.is_running = true;
-            g.is_sending_params = false;
-
-            let mods = g.config.modules.clone();
+    /// 既に制御実行状態 (system_status == 1) になっているMDDへ生存維持用の目標値フレームを送出
+    fn send_keepalive_to_confirmed_mdds(&self) {
+        let frames: Vec<(u16, [u8; 8])> = {
+            let g = self.inner.lock().unwrap();
             let mut list = Vec::new();
-            for m in &mods {
-                if m.module_type == "mdd" {
-                    if let Some(base_id) = parse_hex_id(&m.base_id) {
-                        if let Some(cache) = g.mdd_feedback_cache.get_mut(&base_id) {
-                            cache.system_status = 1;
-                            list.push((m.name.clone(), cache.clone()));
-                        }
+            for m in &g.config.modules {
+                if m.module_type != "mdd" {
+                    continue;
+                }
+                let Some(base_id) = parse_hex_id(&m.base_id) else {
+                    continue;
+                };
+                let confirmed = g.mdd_param_confirmed.get(&base_id).copied().unwrap_or(false);
+                let status_one = g
+                    .mdd_feedback_cache
+                    .get(&base_id)
+                    .map(|c| c.system_status == 1)
+                    .unwrap_or(false);
+                if confirmed || status_one {
+                    let targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
+                    let mut payload = [0u8; 8];
+                    for (i, t) in targets.iter().enumerate() {
+                        let scaled = (t * 10.0).trunc();
+                        payload[i * 2..i * 2 + 2].copy_from_slice(&encode_int16_le(scaled));
                     }
+                    list.push((base_id + 0x20, payload));
                 }
             }
             list
         };
+        for (can_id, payload) in frames {
+            (self.send_can_fn)(can_id, &payload, "can1");
+        }
+    }
 
-        for (name, data) in feedback_notifications {
-            let _ = self.ws_tx.send(WsEvent::MddFeedback { name, data });
+    /// パラメータ一括送信 ＆ 全マイコンからの完了応答を確認するまで継続送信 (Send Params & Start)
+    pub async fn start_control(&self) -> Result<String, String> {
+        let (session_id, has_mdd) = {
+            let mut g = self.inner.lock().unwrap();
+            g.send_session_id = g.send_session_id.wrapping_add(1);
+            let sid = g.send_session_id;
+            g.is_sending_params = true;
+            g.is_running = false;
+            g.mdd_param_sent_at.clear();
+            g.mdd_param_confirmed.clear();
+
+            let mut any_mdd = false;
+            let mods = g.config.modules.clone();
+            for m in &mods {
+                if m.module_type == "mdd" {
+                    if let Some(base_id) = parse_hex_id(&m.base_id) {
+                        any_mdd = true;
+                        g.mdd_param_confirmed.insert(base_id, false);
+                    }
+                }
+            }
+            (sid, any_mdd)
+        };
+
+        if !has_mdd {
+            let mut g = self.inner.lock().unwrap();
+            if g.send_session_id == session_id {
+                g.is_sending_params = false;
+                g.is_running = true;
+            }
+            return Ok("パラメータが正常に送信され、制御システムが実行状態に遷移しました。".to_string());
         }
 
-        Ok("パラメータが正常に送信され、制御システムが実行状態に遷移しました。".to_string())
+        let mut round = 0usize;
+        let mut last_log_time = Instant::now() - Duration::from_secs(10);
+
+        loop {
+            round += 1;
+
+            let mdd_modules = {
+                let g = self.inner.lock().unwrap();
+                if !g.is_sending_params || g.send_session_id != session_id {
+                    return Err("パラメータ送信が中断されました。".to_string());
+                }
+                g.config
+                    .modules
+                    .iter()
+                    .filter(|m| m.module_type == "mdd")
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+
+            if mdd_modules.is_empty() {
+                break;
+            }
+
+            // 未完了のMDDモジュールに対してパラメータを送信
+            for m in &mdd_modules {
+                let Some(base_id) = parse_hex_id(&m.base_id) else {
+                    continue;
+                };
+
+                let is_confirmed = {
+                    let g = self.inner.lock().unwrap();
+                    if !g.is_sending_params || g.send_session_id != session_id {
+                        return Err("パラメータ送信が中断されました。".to_string());
+                    }
+                    g.mdd_param_confirmed.get(&base_id).copied().unwrap_or(false)
+                };
+
+                // 完了応答(system_status == 1)を受信済みのマイコンには生存維持フレームを送りスキップ
+                if is_confirmed {
+                    self.send_keepalive_to_confirmed_mdds();
+                    continue;
+                }
+
+                let params = m.parameters.clone().unwrap_or_default();
+
+                // 1. M1〜M4のPIDゲインおよび車輪径の送信 (Base ID + 0x00 .. 0x03)
+                for idx in 0..4u16 {
+                    let key = format!("m{}", idx + 1);
+                    let mp = params.get(&key).cloned().unwrap_or_else(MotorParam::default);
+
+                    let dir_val: f64 = if mp.direction >= 0 { 1.0 } else { -1.0 };
+
+                    // P, I, D は 1000倍、Diameter は 10倍して int16_t リトルエンディアンにパック
+                    let p_int = (mp.p * 1000.0 * dir_val).trunc();
+                    let i_int = (mp.i * 1000.0 * dir_val).trunc();
+                    let d_int = (mp.d * 1000.0 * dir_val).trunc();
+                    let dia_int = (mp.diameter * 10.0).trunc();
+
+                    let mut payload = [0u8; 8];
+                    payload[0..2].copy_from_slice(&encode_int16_le(p_int));
+                    payload[2..4].copy_from_slice(&encode_int16_le(i_int));
+                    payload[4..6].copy_from_slice(&encode_int16_le(d_int));
+                    payload[6..8].copy_from_slice(&encode_int16_le(dia_int));
+
+                    (self.send_can_fn)(base_id + idx, &payload, "can1");
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+
+                // 2. 4chの制御モード一括送信とシステム起動トリガ (Base ID + 0x10)
+                let mut mode_payload = [0u8; 4];
+                for idx in 0..4usize {
+                    let key = format!("m{}", idx + 1);
+                    let mp = params.get(&key).cloned().unwrap_or_else(MotorParam::default);
+                    mode_payload[idx] = mp.mode;
+                }
+                (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1");
+                tokio::time::sleep(Duration::from_millis(25)).await;
+
+                // このマイコンへの一括送信完了時刻を記録（これ以降の status=1 返信を有効と判定）
+                {
+                    let mut g = self.inner.lock().unwrap();
+                    g.mdd_param_sent_at.entry(base_id).or_insert_with(Instant::now);
+                }
+
+                // 他に起動済みのMDDがあればタイムアウトを防ぐため目標値フレームを送出
+                self.send_keepalive_to_confirmed_mdds();
+            }
+
+            // マイコンからのステータス返信 (Base ID + 0x30, data[5] == 1) を待機・確認
+            let wait_start = Instant::now();
+            let mut all_confirmed = false;
+            while wait_start.elapsed() < Duration::from_millis(150) {
+                self.send_keepalive_to_confirmed_mdds();
+                tokio::time::sleep(Duration::from_millis(15)).await;
+
+                let (done, aborted) = {
+                    let g = self.inner.lock().unwrap();
+                    if !g.is_sending_params || g.send_session_id != session_id {
+                        (false, true)
+                    } else {
+                        let all_ok = mdd_modules.iter().all(|m| {
+                            parse_hex_id(&m.base_id)
+                                .and_then(|bid| g.mdd_param_confirmed.get(&bid).copied())
+                                .unwrap_or(false)
+                        });
+                        (all_ok, false)
+                    }
+                };
+
+                if aborted {
+                    return Err("パラメータ送信が中断されました。".to_string());
+                }
+                if done {
+                    all_confirmed = true;
+                    break;
+                }
+            }
+
+            if all_confirmed {
+                break;
+            }
+
+            // まだ応答がないマイコンがある場合は進捗をログ出力して再送信を継続
+            if round == 1 || last_log_time.elapsed() >= Duration::from_millis(1500) {
+                last_log_time = Instant::now();
+                let (confirmed_names, pending_names) = {
+                    let g = self.inner.lock().unwrap();
+                    let mut ok_list = Vec::new();
+                    let mut ng_list = Vec::new();
+                    for m in &mdd_modules {
+                        if let Some(bid) = parse_hex_id(&m.base_id) {
+                            if g.mdd_param_confirmed.get(&bid).copied().unwrap_or(false) {
+                                ok_list.push(m.name.clone());
+                            } else {
+                                ng_list.push(m.name.clone());
+                            }
+                        }
+                    }
+                    (ok_list, ng_list)
+                };
+                let ok_str = if confirmed_names.is_empty() {
+                    "なし".to_string()
+                } else {
+                    confirmed_names.join(", ")
+                };
+                let ng_str = pending_names.join(", ");
+                let _ = self.ws_tx.send(WsEvent::BehaviorLog {
+                    data: format!(
+                        "[SYSTEM] パラメータ送信・応答待機中... (完了: {} / 応答待ち: {})",
+                        ok_str, ng_str
+                    ),
+                });
+            }
+        }
+
+        let confirmed_names = {
+            let mut g = self.inner.lock().unwrap();
+            if g.send_session_id != session_id {
+                return Err("パラメータ送信が中断されました。".to_string());
+            }
+            g.is_running = true;
+            g.is_sending_params = false;
+
+            g.config
+                .modules
+                .iter()
+                .filter(|m| m.module_type == "mdd")
+                .map(|m| m.name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        Ok(format!(
+            "全マイコン ({}) からの設定完了応答を確認し、制御実行状態になりました。",
+            confirmed_names.join(", ")
+        ))
     }
 
     pub fn handle_can_rx(&self, frame: &CanFrameEvent) {
@@ -300,8 +473,9 @@ impl ModuleManager {
                     if data.len() < 6 {
                         continue;
                     }
-                    let in_grace = g.control_start_time.elapsed() < Duration::from_millis(1200);
+                    let status_byte = data[5];
                     let is_running = g.is_running;
+                    let is_sending = g.is_sending_params;
 
                     let mut reset_detected = false;
                     if let Some(cache) = g.mdd_feedback_cache.get_mut(&base_id) {
@@ -312,12 +486,21 @@ impl ModuleManager {
                             data[3] != 0,
                         ];
                         cache.error_code = data[4];
-                        if data[5] == 0 && is_running && in_grace {
-                            cache.system_status = 1;
-                        } else {
-                            cache.system_status = data[5];
+                        cache.system_status = status_byte;
+                    }
+
+                    if status_byte == 1 {
+                        // パラメータ送信完了時刻以降の status == 1 応答をもって設定完了と判定
+                        if let Some(&sent_at) = g.mdd_param_sent_at.get(&base_id) {
+                            if Instant::now() >= sent_at {
+                                g.mdd_param_confirmed.insert(base_id, true);
+                            }
                         }
-                        if data[5] == 0 && is_running && !in_grace {
+                    } else {
+                        // 待機状態 (status == 0)
+                        let was_confirmed = g.mdd_param_confirmed.insert(base_id, false).unwrap_or(false);
+                        g.mdd_param_sent_at.remove(&base_id);
+                        if is_running && !is_sending && was_confirmed {
                             reset_detected = true;
                         }
                     }

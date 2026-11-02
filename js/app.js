@@ -13,8 +13,9 @@ document.addEventListener("DOMContentLoaded", () => {
     profiles: [],
     canConnected: false,
     behaviorStatus: "IDLE",
-    controlMode: "SETUP", // SETUP (送信待ち), CONTROL (制御中)
-    controlStartTimeMs: 0, // パラメータ送信直後の古いテレメトリによる誤リセット防止用タイムスタンプ
+    controlMode: "SETUP", // SETUP (送信待ち), SENDING (送信・応答待機中), CONTROL (制御中)
+    isSendingParams: false,
+    mddStatuses: {}, // 各MDDモジュールのマイコン側システム状態 (0=待機中, 1=制御実行中)
     moduleSendToggles: {}, // 各モジュールへのUI指令値の送信ON/OFFトグル状態
     gamepadMappings: [], // コントローラーのマッピングデータ
   };
@@ -891,20 +892,27 @@ document.addEventListener("DOMContentLoaded", () => {
       if (card) card.style.borderColor = "var(--border-light)";
     }
 
-    // マイコン側のモード判定による自動リセット検知
+    // マイコン側のモード判定による自動リセット検知（全MDDの状態を個別に管理しピンポン発振を防止）
     if (typeof data.system_status !== 'undefined') {
-      const inGracePeriod = (Date.now() - (state.controlStartTimeMs || 0)) < 1500;
-      if (data.system_status === 1 && state.controlMode !== "CONTROL") {
-        state.controlMode = "CONTROL";
-        if (el.lblControlModeStatus) {
-          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">制御実行中 (Control Mode)</span>';
+      const prevStatus = state.mddStatuses[name];
+      state.mddStatuses[name] = data.system_status;
+
+      if (!state.isSendingParams) {
+        const mddModules = (state.config?.modules || []).filter(m => m.type === "mdd");
+        const allRunning = mddModules.length > 0 && mddModules.every(m => state.mddStatuses[m.name] === 1);
+
+        if (allRunning && state.controlMode !== "CONTROL") {
+          state.controlMode = "CONTROL";
+          if (el.lblControlModeStatus) {
+            el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">制御実行中 (Control Mode)</span>';
+          }
+        } else if (data.system_status === 0 && (state.controlMode === "CONTROL" || prevStatus === 1)) {
+          state.controlMode = "SETUP";
+          if (el.lblControlModeStatus) {
+            el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';
+          }
+          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] マイコン '${name}' の待機状態（パラメータ設定モード）へのリセットを検知しました。パラメータを再送信してください。`, "system-msg");
         }
-      } else if (data.system_status === 0 && state.controlMode === "CONTROL" && !inGracePeriod) {
-        state.controlMode = "SETUP";
-        if (el.lblControlModeStatus) {
-          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';
-        }
-        appendTerminalLog(el.behaviorTerminal, `[SYSTEM] マイコン '${name}' の待機状態（パラメータ設定モード）へのリセットを検知しました。パラメータを再送信してください。`, "system-msg");
       }
     }
   }
@@ -1057,22 +1065,41 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // パラメータ送信 ＆ 制御開始
+  // パラメータ送信 ＆ 全マイコン応答待機 ＆ 制御開始
   el.btnSendParams.addEventListener("click", async () => {
-    appendTerminalLog(el.behaviorTerminal, "制御パラメータ送信中...");
+    state.isSendingParams = true;
+    state.controlMode = "SENDING";
+    if (el.lblControlModeStatus) {
+      el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ送信・応答待機中...</span>';
+    }
+    appendTerminalLog(el.behaviorTerminal, "制御パラメータを送信し、全マイコンからの設定完了応答を待機しています...");
     try {
       const res = await fetch("/api/start_control", { method: "POST" });
       const data = await res.json();
+      state.isSendingParams = false;
 
       if (data.success) {
-        state.controlStartTimeMs = Date.now();
-        appendTerminalLog(el.behaviorTerminal, "[SYSTEM] パラメータ送信成功。制御実行状態になりました！", "system-msg");
-        el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">制御実行中 (Control Mode)</span>';
+        (state.config?.modules || []).forEach(m => {
+          if (m.type === "mdd") state.mddStatuses[m.name] = 1;
+        });
+        appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+        if (el.lblControlModeStatus) {
+          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">制御実行中 (Control Mode)</span>';
+        }
         state.controlMode = "CONTROL";
       } else {
+        state.controlMode = "SETUP";
+        if (el.lblControlModeStatus) {
+          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';
+        }
         appendTerminalLog(el.behaviorTerminal, `[ERROR] 送信失敗: ${data.message}`, "error-msg");
       }
     } catch (err) {
+      state.isSendingParams = false;
+      state.controlMode = "SETUP";
+      if (el.lblControlModeStatus) {
+        el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';
+      }
       appendTerminalLog(el.behaviorTerminal, `[ERROR] 通信失敗: ${err}`, "error-msg");
     }
   });

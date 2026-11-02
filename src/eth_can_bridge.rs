@@ -450,7 +450,11 @@ impl EthCanBridge {
                     let _ = ws_tx.send(WsEvent::CanStatus { data: status });
                 }
 
-                std::thread::sleep(Duration::from_millis(1));
+                // 接続中は sock.read の2msタイムアウト自体が待機として機能するため、
+                // Windowsの thread::sleep(1ms) による約15ms遅延を回避し、未接続時のみスリープする
+                if stream_opt.is_none() {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
             }
         });
     }
