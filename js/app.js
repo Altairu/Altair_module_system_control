@@ -309,8 +309,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const p = (readInt16LE(bytes, 0) / 1000).toFixed(2);
             const i = (readInt16LE(bytes, 2) / 1000).toFixed(2);
             const d = (readInt16LE(bytes, 4) / 1000).toFixed(2);
-            const dia = (readInt16LE(bytes, 6) / 10).toFixed(0);
-            decoded = `P:${p} I:${i} D:${d} 径:${dia}mm`;
+            const diaRaw = readInt16LE(bytes, 6);
+            const dirStr = diaRaw < 0 ? "Rev(-)" : "Fwd(+)";
+            decoded = `P:${p} I:${i} D:${d} 径:${Math.abs(diaRaw)}mm ${dirStr}`;
           }
           return { moduleName: m.name, label: `${m.name} / PID設定(M${ch})`, decoded };
         }

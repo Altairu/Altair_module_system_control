@@ -7,6 +7,12 @@ use tokio::sync::broadcast;
 
 use crate::types::{CanFrameEvent, CanStatusEvent, WsEvent};
 
+#[cfg(target_os = "windows")]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+}
+
 const ANALYZER_RX_SIZE: usize = 60;
 const ANALYZER_TX_SIZE: usize = 20;
 
@@ -188,6 +194,12 @@ impl EthCanBridge {
         };
 
         if is_config_frame {
+            // 既に同一CAN IDの設定フレームがキューに残っている場合は古い重複分を除去して最新設定で置き換える
+            guard.tx_queue.retain(|existing| {
+                !(existing.is_config_frame
+                    && existing.can_id == item.can_id
+                    && existing.send_to_can2 == item.send_to_can2)
+            });
             // 設定フレーム (0x200..0x203, 0x210) はSTM32側の1msタイマーで確実に拾わせるため3回連続でキューに積む
             for _ in 0..3 {
                 guard.tx_queue.push_back(item.clone());
@@ -221,6 +233,12 @@ impl EthCanBridge {
         let rx_tx = self.rx_tx.clone();
 
         std::thread::spawn(move || {
+            // Windowsのデフォルトタイマー分解能(15.625ms)によるスリープ・タイムアウト遅延を防ぐため1ms分解能を要求
+            #[cfg(target_os = "windows")]
+            unsafe {
+                timeBeginPeriod(1);
+            }
+
             let mut stream_opt: Option<TcpStream> = None;
             let mut rx_buffer = [0u8; ANALYZER_RX_SIZE];
             let mut buffer_filled = 0usize;
@@ -232,6 +250,7 @@ impl EthCanBridge {
 
             let mut last_wire_send_time = Instant::now() - Duration::from_millis(100);
             let mut last_config_tx_time = Instant::now() - Duration::from_millis(100);
+            let mut last_sent_config_id: Option<u16> = None;
             let mut last_reconnect_attempt = Instant::now() - Duration::from_secs(2);
 
             loop {
@@ -291,13 +310,14 @@ impl EthCanBridge {
 
                     match connect_res {
                         Ok(sock) => {
-                            // C++ altair_eth_can_bridge と同一のソケット属性を設定
-                            // TCP_NODELAY 有効化、送受信タイムアウト設定 (ノンブロッキングにはしない)
+                            // WindowsでのSO_RCVTIMEOによる15.6msブロッキング遅延を排除するため、
+                            // TCP_NODELAYを有効化した上でノンブロッキングソケットとして駆動する
                             let _ = sock.set_nodelay(true);
-                            let _ = sock.set_read_timeout(Some(Duration::from_millis(2)));
                             let _ = sock.set_write_timeout(Some(Duration::from_millis(1000)));
+                            let _ = sock.set_nonblocking(true);
 
                             stream_opt = Some(sock);
+                            last_sent_config_id = None;
                             let status = {
                                 let mut g = inner.lock().unwrap();
                                 g.is_connected = true;
@@ -326,24 +346,20 @@ impl EthCanBridge {
 
                 // 送受信処理
                 let mut disconnected_err: Option<String> = None;
+                let mut did_work = false;
 
                 if let Some(sock) = stream_opt.as_mut() {
-                    // 1. 受信処理 (60バイト固定長パケット)
-                    let mut temp_buf = [0u8; 512];
-                    match sock.read(&mut temp_buf) {
-                        Ok(0) => {
-                            disconnected_err = Some("TCP接続が切断されました".to_string());
-                        }
-                        Ok(n) => {
-                            let mut offset = 0;
-                            while offset < n {
-                                let copy_len =
-                                    (ANALYZER_RX_SIZE - buffer_filled).min(n - offset);
-                                rx_buffer[buffer_filled..buffer_filled + copy_len]
-                                    .copy_from_slice(&temp_buf[offset..offset + copy_len]);
-                                buffer_filled += copy_len;
-                                offset += copy_len;
-
+                    // 1. 受信処理 (60バイト固定長パケットをノンブロッキングで読み取り)
+                    loop {
+                        let remaining = ANALYZER_RX_SIZE - buffer_filled;
+                        match sock.read(&mut rx_buffer[buffer_filled..buffer_filled + remaining]) {
+                            Ok(0) => {
+                                disconnected_err = Some("TCP接続が切断されました".to_string());
+                                break;
+                            }
+                            Ok(n) => {
+                                did_work = true;
+                                buffer_filled += n;
                                 if buffer_filled >= ANALYZER_RX_SIZE {
                                     buffer_filled = 0;
                                     Self::parse_and_publish_rx(
@@ -357,40 +373,62 @@ impl EthCanBridge {
                                     );
                                 }
                             }
-                        }
-                        Err(ref e)
-                            if e.kind() == ErrorKind::TimedOut
-                                || e.kind() == ErrorKind::WouldBlock
-                                || e.kind() == ErrorKind::Interrupted =>
-                        {
-                            // タイムアウトまたは待機継続 (正常動作)
-                        }
-                        Err(e) => {
-                            disconnected_err = Some(format!("TCP受信エラー: {}", e));
+                            Err(ref e)
+                                if e.kind() == ErrorKind::WouldBlock
+                                    || e.kind() == ErrorKind::TimedOut =>
+                            {
+                                break;
+                            }
+                            Err(ref e) if e.kind() == ErrorKind::Interrupted => {
+                                continue;
+                            }
+                            Err(e) => {
+                                disconnected_err = Some(format!("TCP受信エラー: {}", e));
+                                break;
+                            }
                         }
                     }
 
                     // 2. 送信 / ポーリング処理 (20バイト固定長パケット)
-                    // STM32の interrupt() タイマー (1ms) に配慮し、最低2.0msの間隔を空ける
+                    // STM32の interrupt() タイマー (1ms) に配慮し、送信間隔と設定フレーム後の保持時間を厳密に管理する
                     if disconnected_err.is_none() {
                         let now = Instant::now();
                         let since_last_send_ms =
                             now.duration_since(last_wire_send_time).as_secs_f64() * 1000.0;
+                        let since_config_tx_ms =
+                            now.duration_since(last_config_tx_time).as_secs_f64() * 1000.0;
 
-                        if since_last_send_ms >= 2.0 {
+                        if since_last_send_ms >= 2.5 {
                             let next_item = {
                                 let mut g = inner.lock().unwrap();
-                                g.tx_queue.pop_front()
+                                match g.tx_queue.front() {
+                                    Some(front) => {
+                                        // 直前に送信した設定フレームと異なるIDへ切り替わる際は、
+                                        // STM32側の eth_recv_data が1ms割り込みで確実にCAN送信されるよう最低8ms保持する
+                                        let need_config_hold = match last_sent_config_id {
+                                            Some(prev_id) => front.can_id != prev_id,
+                                            None => false,
+                                        };
+                                        if need_config_hold && since_config_tx_ms < 8.0 {
+                                            None
+                                        } else {
+                                            g.tx_queue.pop_front()
+                                        }
+                                    }
+                                    None => None,
+                                }
                             };
 
                             let mut tx_payload = [0u8; ANALYZER_TX_SIZE];
                             let mut is_config_tx = false;
+                            let mut sent_can_id: Option<u16> = None;
                             let mut should_send_wire = false;
                             let mut event_to_send: Option<CanFrameEvent> = None;
 
                             if let Some(item) = next_item {
                                 tx_payload.copy_from_slice(&item.payload);
                                 is_config_tx = item.is_config_frame;
+                                sent_can_id = Some(item.can_id);
                                 should_send_wire = true;
                                 event_to_send = Some(CanFrameEvent {
                                     direction: "TX".to_string(),
@@ -404,27 +442,39 @@ impl EthCanBridge {
                                     data: item.raw_data,
                                 });
                             } else {
-                                let since_config_tx_ms =
-                                    now.duration_since(last_config_tx_time).as_secs_f64() * 1000.0;
-                                // 設定フレーム送信直後はSTM32の eth_recv_data をゼロで上書きしないよう poll を抑制し、
+                                let queue_empty = inner.lock().unwrap().tx_queue.is_empty();
+                                // 設定フレーム送信直後はSTM32の eth_recv_data をゼロで上書きしないよう15msの間 poll を抑制し、
                                 // 通常時は 5.0ms 周期で 20B ゼロパケットを送信して 5ms 周期の CAN RX を継続させる
-                                if since_last_send_ms >= 5.0 && since_config_tx_ms >= 15.0 {
+                                if queue_empty && since_last_send_ms >= 5.0 && since_config_tx_ms >= 15.0 {
                                     tx_payload = [0u8; ANALYZER_TX_SIZE];
                                     should_send_wire = true;
                                 }
                             }
 
                             if should_send_wire {
-                                if let Err(e) = sock.write_all(&tx_payload) {
-                                    disconnected_err = Some(format!("TCP送信エラー: {}", e));
-                                } else {
-                                    let _ = sock.flush();
-                                    last_wire_send_time = now;
-                                    if is_config_tx {
-                                        last_config_tx_time = now;
+                                match sock.write_all(&tx_payload) {
+                                    Ok(()) => {
+                                        let _ = sock.flush();
+                                        did_work = true;
+                                        last_wire_send_time = now;
+                                        if is_config_tx {
+                                            last_config_tx_time = now;
+                                            last_sent_config_id = sent_can_id;
+                                        } else {
+                                            last_sent_config_id = None;
+                                        }
+                                        if let Some(ev) = event_to_send {
+                                            let _ = rx_tx.send(ev);
+                                        }
                                     }
-                                    if let Some(ev) = event_to_send {
-                                        let _ = rx_tx.send(ev);
+                                    Err(ref e)
+                                        if e.kind() == ErrorKind::WouldBlock
+                                            || e.kind() == ErrorKind::TimedOut =>
+                                    {
+                                        // ソケット送信バッファ空き待ち
+                                    }
+                                    Err(e) => {
+                                        disconnected_err = Some(format!("TCP送信エラー: {}", e));
                                     }
                                 }
                             }
@@ -435,6 +485,7 @@ impl EthCanBridge {
                 if let Some(err) = disconnected_err {
                     stream_opt = None;
                     buffer_filled = 0;
+                    last_sent_config_id = None;
                     let status = {
                         let mut g = inner.lock().unwrap();
                         g.is_connected = false;
@@ -450,10 +501,10 @@ impl EthCanBridge {
                     let _ = ws_tx.send(WsEvent::CanStatus { data: status });
                 }
 
-                // 接続中は sock.read の2msタイムアウト自体が待機として機能するため、
-                // Windowsの thread::sleep(1ms) による約15ms遅延を回避し、未接続時のみスリープする
                 if stream_opt.is_none() {
                     std::thread::sleep(Duration::from_millis(5));
+                } else if !did_work {
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
         });

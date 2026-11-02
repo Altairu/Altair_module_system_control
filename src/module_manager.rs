@@ -210,7 +210,7 @@ impl ModuleManager {
         }
     }
 
-    /// 既に制御実行状態 (system_status == 1) になっているMDDへ生存維持用の目標値フレームを送出
+    /// 既に制御実行状態 (system_status == 1) または起動トリガ送信済みのMDDへ生存維持用の目標値フレームを送出
     fn send_keepalive_to_confirmed_mdds(&self) {
         let frames: Vec<(u16, [u8; 8])> = {
             let g = self.inner.lock().unwrap();
@@ -223,12 +223,13 @@ impl ModuleManager {
                     continue;
                 };
                 let confirmed = g.mdd_param_confirmed.get(&base_id).copied().unwrap_or(false);
+                let sent_trigger = g.mdd_param_sent_at.contains_key(&base_id);
                 let status_one = g
                     .mdd_feedback_cache
                     .get(&base_id)
                     .map(|c| c.system_status == 1)
                     .unwrap_or(false);
-                if confirmed || status_one {
+                if confirmed || sent_trigger || status_one {
                     let targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
                     let mut payload = [0u8; 8];
                     for (i, t) in targets.iter().enumerate() {
@@ -328,13 +329,14 @@ impl ModuleManager {
                     let key = format!("m{}", idx + 1);
                     let mp = params.get(&key).cloned().unwrap_or_else(MotorParam::default);
 
-                    let dir_val: f64 = if mp.direction >= 0 { 1.0 } else { -1.0 };
+                    let dir_sign: f64 = if mp.direction >= 0 { 1.0 } else { -1.0 };
 
-                    // P, I, D は 1000倍、Diameter は 10倍して int16_t リトルエンディアンにパック
-                    let p_int = (mp.p * 1000.0 * dir_val).trunc();
-                    let i_int = (mp.i * 1000.0 * dir_val).trunc();
-                    let d_int = (mp.d * 1000.0 * dir_val).trunc();
-                    let dia_int = (mp.diameter * 10.0).trunc();
+                    // altair_framework および MDD ファームウェア仕様に準拠:
+                    // P, I, D は 1000倍、車輪径(mm)は符号で回転方向(Fwd:+ / Rev:-)を表現して int16_t リトルエンディアンにパック
+                    let p_int = (mp.p * 1000.0).round();
+                    let i_int = (mp.i * 1000.0).round();
+                    let d_int = (mp.d * 1000.0).round();
+                    let dia_int = (mp.diameter.abs() * dir_sign).round();
 
                     let mut payload = [0u8; 8];
                     payload[0..2].copy_from_slice(&encode_int16_le(p_int));
@@ -343,7 +345,8 @@ impl ModuleManager {
                     payload[6..8].copy_from_slice(&encode_int16_le(dia_int));
 
                     (self.send_can_fn)(base_id + idx, &payload, "can1");
-                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    // 3連送(約5ms) + STM32側15ms保持ウィンドウ + ポーリング余裕を確保するため35ms待機
+                    tokio::time::sleep(Duration::from_millis(35)).await;
                 }
 
                 // 2. 4chの制御モード一括送信とシステム起動トリガ (Base ID + 0x10)
@@ -353,25 +356,27 @@ impl ModuleManager {
                     let mp = params.get(&key).cloned().unwrap_or_else(MotorParam::default);
                     mode_payload[idx] = mp.mode;
                 }
-                (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1");
-                tokio::time::sleep(Duration::from_millis(25)).await;
 
-                // このマイコンへの一括送信完了時刻を記録（これ以降の status=1 返信を有効と判定）
+                // 起動トリガ送信時刻を先に記録し、直後に返る status == 1 返信を確実に捕捉できるようにする
                 {
                     let mut g = self.inner.lock().unwrap();
-                    g.mdd_param_sent_at.entry(base_id).or_insert_with(Instant::now);
+                    g.mdd_param_sent_at.insert(base_id, Instant::now());
                 }
 
-                // 他に起動済みのMDDがあればタイムアウトを防ぐため目標値フレームを送出
+                (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1");
+                tokio::time::sleep(Duration::from_millis(40)).await;
+
+                // 起動直後のマイコンおよび他マイコンが 500ms CANタイムアウト(Err:0x01)にならないよう目標値フレームを送出
                 self.send_keepalive_to_confirmed_mdds();
+                tokio::time::sleep(Duration::from_millis(15)).await;
             }
 
             // マイコンからのステータス返信 (Base ID + 0x30, data[5] == 1) を待機・確認
             let wait_start = Instant::now();
             let mut all_confirmed = false;
-            while wait_start.elapsed() < Duration::from_millis(150) {
+            while wait_start.elapsed() < Duration::from_millis(240) {
                 self.send_keepalive_to_confirmed_mdds();
-                tokio::time::sleep(Duration::from_millis(15)).await;
+                tokio::time::sleep(Duration::from_millis(20)).await;
 
                 let (done, aborted) = {
                     let g = self.inner.lock().unwrap();
@@ -490,18 +495,27 @@ impl ModuleManager {
                     }
 
                     if status_byte == 1 {
-                        // パラメータ送信完了時刻以降の status == 1 応答をもって設定完了と判定
-                        if let Some(&sent_at) = g.mdd_param_sent_at.get(&base_id) {
-                            if Instant::now() >= sent_at {
-                                g.mdd_param_confirmed.insert(base_id, true);
-                            }
+                        // パラメータ送信トリガ以降の status == 1 応答をもって設定完了と判定
+                        if g.mdd_param_sent_at.contains_key(&base_id) || is_sending {
+                            g.mdd_param_confirmed.insert(base_id, true);
                         }
                     } else {
                         // 待機状態 (status == 0)
-                        let was_confirmed = g.mdd_param_confirmed.insert(base_id, false).unwrap_or(false);
-                        g.mdd_param_sent_at.remove(&base_id);
-                        if is_running && !is_sending && was_confirmed {
-                            reset_detected = true;
+                        // パラメータ送信中にインフライトで届いた古い status == 0 フレームで
+                        // mdd_param_sent_at を消去してしまうと以降の status == 1 を認識できなくなるため保持する
+                        if is_sending {
+                            if let Some(&sent_at) = g.mdd_param_sent_at.get(&base_id) {
+                                if sent_at.elapsed() >= Duration::from_millis(300) {
+                                    g.mdd_param_confirmed.insert(base_id, false);
+                                }
+                            }
+                        } else {
+                            let was_confirmed =
+                                g.mdd_param_confirmed.insert(base_id, false).unwrap_or(false);
+                            g.mdd_param_sent_at.remove(&base_id);
+                            if is_running && was_confirmed {
+                                reset_detected = true;
+                            }
                         }
                     }
 
