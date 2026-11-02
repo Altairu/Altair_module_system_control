@@ -189,6 +189,42 @@ body {
   font-weight: 500;
 }
 
+/* サイドバー下部 (アプリ名とバージョン / ヘルプと更新ボタン) */
+.sidebar-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-app-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.3;
+}
+
+.sidebar-app-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-footer-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.sidebar-footer-actions .btn {
+  white-space: nowrap;
+}
+
 /* --- 5. メインコンテンツエリア --- */
 .main-content {
   padding: 40px 48px;

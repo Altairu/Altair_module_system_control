@@ -1641,7 +1641,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.current_version) {
         const vText = `v${data.current_version}`;
         if (lblAppVersion) lblAppVersion.textContent = vText;
-        if (lblSidebarVersion) lblSidebarVersion.textContent = `Altair_module_system_control ${vText}`;
+        if (lblSidebarVersion) lblSidebarVersion.textContent = vText;
         if (lblAboutVer) lblAboutVer.textContent = vText;
         if (lblModalCurVer) lblModalCurVer.textContent = vText;
       }

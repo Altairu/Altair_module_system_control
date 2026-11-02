@@ -38,7 +38,27 @@ fn embedded_response(content_type: &'static str, body: &'static str) -> impl Int
 }
 
 async fn serve_index_html() -> impl IntoResponse {
-    embedded_response("text/html; charset=utf-8", INDEX_HTML)
+    // WebView2が古いjs/cssをキャッシュから使わないよう、中身のハッシュをURLに付けたindex.htmlを返す
+    static INDEX_WITH_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let html = INDEX_WITH_VERSION.get_or_init(|| {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        STYLES_CSS.hash(&mut hasher);
+        APP_JS.hash(&mut hasher);
+        GAMEPAD_JS.hash(&mut hasher);
+        let v = format!("{:x}", hasher.finish());
+        INDEX_HTML
+            .replace("/css/styles.css\"", &format!("/css/styles.css?v={}\"", v))
+            .replace("/js/app.js\"", &format!("/js/app.js?v={}\"", v))
+            .replace("/js/gamepad.js\"", &format!("/js/gamepad.js?v={}\"", v))
+    });
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        html.as_str(),
+    )
 }
 
 async fn serve_styles_css() -> impl IntoResponse {
