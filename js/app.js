@@ -128,6 +128,16 @@ document.addEventListener("DOMContentLoaded", () => {
           });
         });
       }
+
+      // CANログ画面を開いた際に最新の履歴・集計を即座に描画する
+      if (targetId === "view-logs") {
+        canLogState.pendingStreamEntries = [];
+        if (el.canStatTxCount) el.canStatTxCount.textContent = canLogState.txTotal;
+        if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
+        if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
+        renderCanSummaryTable();
+        rebuildCanStreamTerminals();
+      }
     });
   });
 
@@ -265,9 +275,19 @@ document.addEventListener("DOMContentLoaded", () => {
     rxTotal: 0,
     summaryMap: new Map(), // key: `${dir}_${idHex}`
     knownIds: new Set(),
+    knownIdsDirty: false,
     history: [],           // 直近フレーム履歴 (最大400件)
-    summaryDirty: false,
+    pendingStreamEntries: [], // 次回描画フレームで追加する行キュー
+    rafScheduled: false,
   };
+
+  function formatTimeWithMs(now) {
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const ss = String(now.getSeconds()).padStart(2, "0");
+    const ms = String(now.getMilliseconds()).padStart(3, "0");
+    return `${hh}:${mm}:${ss}.${ms}`;
+  }
 
   function readInt16LE(bytes, offset) {
     if (bytes.length < offset + 2) return 0;
@@ -363,7 +383,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const dlc = parseInt(m[4], 10);
     const hexTokens = m[5].trim() ? m[5].trim().split(/\s+/) : [];
     const bytes = hexTokens.map(h => parseInt(h, 16) || 0);
-    const timeStr = new Date().toLocaleTimeString();
+    const timeStr = formatTimeWithMs(new Date());
     const info = resolveCanFrameInfo(idNum, bytes);
 
     return {
@@ -450,9 +470,14 @@ document.addEventListener("DOMContentLoaded", () => {
     return div;
   }
 
-  function appendStreamRowToTerminal(terminal, entry) {
-    if (!terminal) return;
-    terminal.appendChild(renderCanStreamRow(entry));
+  function appendStreamBatchToTerminal(terminal, entries) {
+    if (!terminal || entries.length === 0) return;
+    const frag = document.createDocumentFragment();
+    const slice = entries.length > 200 ? entries.slice(-200) : entries;
+    for (const entry of slice) {
+      frag.appendChild(renderCanStreamRow(entry));
+    }
+    terminal.appendChild(frag);
     while (terminal.childElementCount > 200) {
       terminal.removeChild(terminal.firstChild);
     }
@@ -464,14 +489,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (el.canLogsTxTerminal) el.canLogsTxTerminal.innerHTML = "";
     if (el.canLogsRxTerminal) el.canLogsRxTerminal.innerHTML = "";
 
-    for (const entry of canLogState.history) {
-      if (!matchesCanFilter(entry)) continue;
-      appendStreamRowToTerminal(el.canLogsTerminal, entry);
-      if (entry.dir === "TX") {
-        appendStreamRowToTerminal(el.canLogsTxTerminal, entry);
-      } else {
-        appendStreamRowToTerminal(el.canLogsRxTerminal, entry);
-      }
+    const filtered = canLogState.history.filter(matchesCanFilter);
+    if (canLogState.viewMode === "combined") {
+      appendStreamBatchToTerminal(el.canLogsTerminal, filtered);
+    } else if (canLogState.viewMode === "split") {
+      appendStreamBatchToTerminal(el.canLogsTxTerminal, filtered.filter(e => e.dir === "TX"));
+      appendStreamBatchToTerminal(el.canLogsRxTerminal, filtered.filter(e => e.dir === "RX"));
     }
   }
 
@@ -536,6 +559,51 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function flushCanLogUI() {
+    canLogState.rafScheduled = false;
+
+    if (canLogState.knownIdsDirty) {
+      canLogState.knownIdsDirty = false;
+      updateCanFilterSelectOptions();
+    }
+
+    const viewLogsEl = document.getElementById("view-logs");
+    const isLogsActive = viewLogsEl && viewLogsEl.classList.contains("active");
+
+    if (!isLogsActive) {
+      canLogState.pendingStreamEntries = [];
+      return;
+    }
+
+    if (el.canStatTxCount) el.canStatTxCount.textContent = canLogState.txTotal;
+    if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
+    if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
+
+    renderCanSummaryTable();
+
+    if (canLogState.pendingStreamEntries.length > 0) {
+      const batch = canLogState.pendingStreamEntries;
+      canLogState.pendingStreamEntries = [];
+
+      if (canLogState.viewMode === "combined") {
+        appendStreamBatchToTerminal(el.canLogsTerminal, batch);
+      } else if (canLogState.viewMode === "split") {
+        const txBatch = [];
+        const rxBatch = [];
+        for (const entry of batch) {
+          if (entry.dir === "TX") txBatch.push(entry);
+          else rxBatch.push(entry);
+        }
+        if (txBatch.length > 0 && canLogState.filterDir !== "RX") {
+          appendStreamBatchToTerminal(el.canLogsTxTerminal, txBatch);
+        }
+        if (rxBatch.length > 0 && canLogState.filterDir !== "TX") {
+          appendStreamBatchToTerminal(el.canLogsRxTerminal, rxBatch);
+        }
+      }
+    }
+  }
+
   function appendCanLog(text) {
     if (canLogState.paused) return;
 
@@ -547,16 +615,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (entry.dir === "TX") {
       canLogState.txTotal++;
-      if (el.canStatTxCount) el.canStatTxCount.textContent = canLogState.txTotal;
     } else {
       canLogState.rxTotal++;
-      if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
     }
 
     if (!canLogState.knownIds.has(entry.idHex)) {
       canLogState.knownIds.add(entry.idHex);
-      if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
-      updateCanFilterSelectOptions();
+      canLogState.knownIdsDirty = true;
     }
 
     const key = `${entry.dir}_${entry.idHex}`;
@@ -573,20 +638,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (matchesCanFilter(entry)) {
-      appendStreamRowToTerminal(el.canLogsTerminal, entry);
-      if (entry.dir === "TX") {
-        appendStreamRowToTerminal(el.canLogsTxTerminal, entry);
-      } else {
-        appendStreamRowToTerminal(el.canLogsRxTerminal, entry);
+      canLogState.pendingStreamEntries.push(entry);
+      if (canLogState.pendingStreamEntries.length > 200) {
+        canLogState.pendingStreamEntries.shift();
       }
     }
 
-    if (!canLogState.summaryDirty) {
-      canLogState.summaryDirty = true;
-      requestAnimationFrame(() => {
-        canLogState.summaryDirty = false;
-        renderCanSummaryTable();
-      });
+    if (!canLogState.rafScheduled) {
+      canLogState.rafScheduled = true;
+      requestAnimationFrame(flushCanLogUI);
     }
   }
 
@@ -598,6 +658,7 @@ document.addEventListener("DOMContentLoaded", () => {
       el.canFilterDirGroup.querySelectorAll(".can-seg-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       canLogState.filterDir = btn.getAttribute("data-dir") || "ALL";
+      canLogState.pendingStreamEntries = [];
       updateCanViewLayout();
       renderCanSummaryTable();
       rebuildCanStreamTerminals();
@@ -612,7 +673,9 @@ document.addEventListener("DOMContentLoaded", () => {
       el.canViewModeGroup.querySelectorAll(".can-seg-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       canLogState.viewMode = btn.getAttribute("data-mode") || "split";
+      canLogState.pendingStreamEntries = [];
       updateCanViewLayout();
+      rebuildCanStreamTerminals();
     });
   }
 
@@ -686,7 +749,9 @@ document.addEventListener("DOMContentLoaded", () => {
       canLogState.rxTotal = 0;
       canLogState.summaryMap.clear();
       canLogState.knownIds.clear();
+      canLogState.knownIdsDirty = false;
       canLogState.history = [];
+      canLogState.pendingStreamEntries = [];
       if (el.canStatTxCount) el.canStatTxCount.textContent = "0";
       if (el.canStatRxCount) el.canStatRxCount.textContent = "0";
       if (el.canStatIdCount) el.canStatIdCount.textContent = "0";
@@ -1307,36 +1372,48 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- 8. WebSocket テレメトリ（フィードバック）のカード反映 ---
-  function updateMddCardFeedback(name, data) {
-    // Limitスイッチ
-    for (let i = 0; i < 4; i++) {
-      const swEl = document.getElementById(`sw-${name}-${i + 1}`);
-      if (swEl) {
-        if (data.limit_switches[i]) {
-          swEl.classList.add("active");
-        } else {
-          swEl.classList.remove("active");
+  const pendingMddFeedback = new Map();
+  let mddFeedbackRafScheduled = false;
+
+  function flushMddCardFeedbackDOM() {
+    mddFeedbackRafScheduled = false;
+    for (const [name, data] of pendingMddFeedback.entries()) {
+      // Limitスイッチ
+      for (let i = 0; i < 4; i++) {
+        const swEl = document.getElementById(`sw-${name}-${i + 1}`);
+        if (swEl) {
+          if (data.limit_switches[i]) {
+            swEl.classList.add("active");
+          } else {
+            swEl.classList.remove("active");
+          }
         }
       }
-    }
 
-    // エンコーダフィードバック (角度 ＆ 速度)
-    for (let i = 0; i < 4; i++) {
-      const fbEl = document.getElementById(`lbl-${name}-m${i + 1}-fb`);
-      if (fbEl) {
-        const ang = data.angles[i].toFixed(1);
-        const spd = data.speeds[i].toFixed(2);
-        fbEl.textContent = `${ang}° / ${spd} rps`;
+      // エンコーダフィードバック (角度 ＆ 速度)
+      for (let i = 0; i < 4; i++) {
+        const fbEl = document.getElementById(`lbl-${name}-m${i + 1}-fb`);
+        if (fbEl) {
+          const ang = data.angles[i].toFixed(1);
+          const spd = data.speeds[i].toFixed(2);
+          fbEl.textContent = `${ang}° / ${spd} rps`;
+        }
+      }
+
+      // エラー状態のチェック
+      const card = document.getElementById(`module-card-${name}`);
+      if (card) {
+        card.style.borderColor = data.error_code > 0 ? "var(--color-danger)" : "var(--border-light)";
       }
     }
+    pendingMddFeedback.clear();
+  }
 
-    // エラー状態のチェック
-    if (data.error_code > 0) {
-      const card = document.getElementById(`module-card-${name}`);
-      card.style.borderColor = "var(--color-danger)";
-    } else {
-      const card = document.getElementById(`module-card-${name}`);
-      if (card) card.style.borderColor = "var(--border-light)";
+  function updateMddCardFeedback(name, data) {
+    pendingMddFeedback.set(name, data);
+    if (!mddFeedbackRafScheduled) {
+      mddFeedbackRafScheduled = true;
+      requestAnimationFrame(flushMddCardFeedbackDOM);
     }
 
     // マイコン側のモード判定による自動リセット検知（全MDDの状態を個別に管理しピンポン発振を防止）

@@ -16,7 +16,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 
@@ -130,8 +130,8 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         NetworkConfig::default()
     };
 
-    let (ws_tx, _) = broadcast::channel::<WsEvent>(512);
-    let (rx_tx, _) = broadcast::channel::<CanFrameEvent>(1024);
+    let (ws_tx, _) = broadcast::channel::<WsEvent>(2048);
+    let (rx_tx, _) = broadcast::channel::<CanFrameEvent>(2048);
 
     let active_mode = Arc::new(Mutex::new("eth".to_string()));
 
@@ -171,42 +171,26 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         let mm = module_manager.clone();
         let ws_tx_clone = ws_tx.clone();
         tokio::spawn(async move {
-            // (direction, can_id) ごとに最終配信時刻と前回データを保持し、特定のIDが間引きで消えないようにする
-            let mut last_log_per_id: HashMap<(String, u16), (Instant, Vec<u8>)> = HashMap::new();
             while let Ok(frame) = rx_sub.recv().await {
                 if frame.direction == "RX" {
                     mm.handle_can_rx(&frame);
                 }
 
-                let is_config = frame.id >= 0x200 && (frame.id & 0xFF) < 0x20;
-                let key = (frame.direction.clone(), frame.id);
-                let should_send = match last_log_per_id.get(&key) {
-                    None => true,
-                    Some((last_time, last_data)) => {
-                        let elapsed = last_time.elapsed();
-                        is_config
-                            || elapsed >= Duration::from_millis(100)
-                            || (&frame.data != last_data && elapsed >= Duration::from_millis(25))
-                    }
-                };
-
-                if should_send {
-                    last_log_per_id.insert(key, (Instant::now(), frame.data.clone()));
-                    let data_hex: Vec<String> = frame
-                        .data
-                        .iter()
-                        .map(|b| format!("{:02X}", b))
-                        .collect();
-                    let log_line = format!(
-                        "[{}] ({}) ID: 0x{:03X} [{}] {}",
-                        frame.direction,
-                        frame.channel,
-                        frame.id,
-                        frame.dlc,
-                        data_hex.join(" ")
-                    );
-                    let _ = ws_tx_clone.send(WsEvent::RawCanFrame { data: log_line });
-                }
+                // 5ms周期のテレメトリ (角度FB -> 速度FB -> ステータス) を間引かずリアルタイム配信
+                let data_hex: Vec<String> = frame
+                    .data
+                    .iter()
+                    .map(|b| format!("{:02X}", b))
+                    .collect();
+                let log_line = format!(
+                    "[{}] ({}) ID: 0x{:03X} [{}] {}",
+                    frame.direction,
+                    frame.channel,
+                    frame.id,
+                    frame.dlc,
+                    data_hex.join(" ")
+                );
+                let _ = ws_tx_clone.send(WsEvent::RawCanFrame { data: log_line });
             }
         });
     }

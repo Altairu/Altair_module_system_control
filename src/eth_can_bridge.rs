@@ -231,7 +231,7 @@ impl EthCanBridge {
             let mut last_rx_publish_time1 = Instant::now() - Duration::from_millis(100);
 
             let mut last_wire_send_time = Instant::now() - Duration::from_millis(100);
-            let mut last_real_tx_time = Instant::now() - Duration::from_millis(100);
+            let mut last_config_tx_time = Instant::now() - Duration::from_millis(100);
             let mut last_reconnect_attempt = Instant::now() - Duration::from_secs(2);
 
             loop {
@@ -384,13 +384,13 @@ impl EthCanBridge {
                             };
 
                             let mut tx_payload = [0u8; ANALYZER_TX_SIZE];
-                            let mut has_real_tx = false;
+                            let mut is_config_tx = false;
                             let mut should_send_wire = false;
                             let mut event_to_send: Option<CanFrameEvent> = None;
 
                             if let Some(item) = next_item {
                                 tx_payload.copy_from_slice(&item.payload);
-                                has_real_tx = true;
+                                is_config_tx = item.is_config_frame;
                                 should_send_wire = true;
                                 event_to_send = Some(CanFrameEvent {
                                     direction: "TX".to_string(),
@@ -404,11 +404,11 @@ impl EthCanBridge {
                                     data: item.raw_data,
                                 });
                             } else {
-                                let since_real_tx_ms =
-                                    now.duration_since(last_real_tx_time).as_secs_f64() * 1000.0;
-                                // 実フレーム送信直後はSTM32の eth_recv_data をゼロで上書きしないよう poll を抑制し、
-                                // アイドル時は 5.0ms 周期で 20B ゼロパケットを送信して CAN RX を継続させる
-                                if since_last_send_ms >= 5.0 && since_real_tx_ms >= 15.0 {
+                                let since_config_tx_ms =
+                                    now.duration_since(last_config_tx_time).as_secs_f64() * 1000.0;
+                                // 設定フレーム送信直後はSTM32の eth_recv_data をゼロで上書きしないよう poll を抑制し、
+                                // 通常時は 5.0ms 周期で 20B ゼロパケットを送信して 5ms 周期の CAN RX を継続させる
+                                if since_last_send_ms >= 5.0 && since_config_tx_ms >= 15.0 {
                                     tx_payload = [0u8; ANALYZER_TX_SIZE];
                                     should_send_wire = true;
                                 }
@@ -420,8 +420,8 @@ impl EthCanBridge {
                                 } else {
                                     let _ = sock.flush();
                                     last_wire_send_time = now;
-                                    if has_real_tx {
-                                        last_real_tx_time = now;
+                                    if is_config_tx {
+                                        last_config_tx_time = now;
                                     }
                                     if let Some(ev) = event_to_send {
                                         let _ = rx_tx.send(ev);
