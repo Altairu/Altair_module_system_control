@@ -1914,3 +1914,46 @@ body {
   transition: top 0.15s ease;
   z-index: 1;
 }
+
+/* --- 15. テレメトリ・オシロスコープ (Telemetry Scope) --- */
+.scope-stats-bar {
+  display: flex;
+  gap: 12px;
+}
+
+.scope-stat-card {
+  flex: 1;
+  min-width: 140px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.scope-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.scope-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  margin-top: 2px;
+}
+
+.scope-stat-card.stat-target .scope-stat-value {
+  color: #4dc9f6;
+}
+
+.scope-stat-card.stat-actual .scope-stat-value {
+  color: #fdd663;
+}
+
+.scope-stat-card.stat-error .scope-stat-value {
+  color: #81c995;
+}

@@ -1455,6 +1455,9 @@ document.addEventListener("DOMContentLoaded", () => {
       requestAnimationFrame(flushMddCardFeedbackDOM);
     }
 
+    // オシロスコープ波形バッファへデータを転送
+    updateScopeData(name, data);
+
     // マイコン側のモード判定による自動リセット検知（全MDDの状態を個別に管理しピンポン発振を防止）
     if (typeof data.system_status !== 'undefined') {
       const prevStatus = state.mddStatuses[name];
@@ -3528,4 +3531,462 @@ if __name__ == '__main__':
       codeDrawer.classList.remove("open");
     });
   }
+
+  // =========================================================================
+  // --- 16. テレメトリ・オシロスコープ (Telemetry Scope) ---
+  // =========================================================================
+  const scopeState = {
+    buffers: new Map(), // key: `${modName}_${motorIdx}`, value: Array of samples
+    isPaused: false,
+    selectedModule: "",
+    selectedMotor: 0,
+    selectedMetric: "angle", // "angle" or "speed"
+    rangeSeconds: 5,
+    prevSwStates: new Map(), // key: modName, value: [false, false, false, false]
+    knownModules: new Set(),
+  };
+
+  const selScopeModule = document.getElementById("scope-module-select");
+  const selScopeMotor = document.getElementById("scope-motor-select");
+  const selScopeMetric = document.getElementById("scope-metric-select");
+  const selScopeRange = document.getElementById("scope-range-select");
+  const btnScopePause = document.getElementById("btn-scope-pause");
+  const btnScopeExportCsv = document.getElementById("btn-scope-export-csv");
+
+  function updateScopeModuleSelect() {
+    if (!selScopeModule) return;
+    const currentVal = selScopeModule.value;
+    selScopeModule.innerHTML = "";
+
+    const mods = Array.from(scopeState.knownModules);
+    if (mods.length === 0) {
+      selScopeModule.innerHTML = '<option value="">モジュールなし</option>';
+      return;
+    }
+
+    mods.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      if (name === scopeState.selectedModule) opt.selected = true;
+      selScopeModule.appendChild(opt);
+    });
+
+    if (!scopeState.selectedModule && mods.length > 0) {
+      scopeState.selectedModule = mods[0];
+      selScopeModule.value = mods[0];
+    }
+  }
+
+  function updateScopeData(name, data) {
+    if (!name || !data) return;
+
+    if (!scopeState.knownModules.has(name)) {
+      scopeState.knownModules.add(name);
+      updateScopeModuleSelect();
+    }
+    if (!scopeState.selectedModule) {
+      scopeState.selectedModule = name;
+      updateScopeModuleSelect();
+    }
+
+    const now = performance.now() / 1000.0;
+    const angles = data.angles || [0, 0, 0, 0];
+    const speeds = data.speeds || [0, 0, 0, 0];
+    const targets = data.targets || [0, 0, 0, 0];
+    const limitSw = data.limit_switches || [false, false, false, false];
+
+    // エッジ検出（OFF ➔ ON への立ち上がり変化）
+    const prevSw = scopeState.prevSwStates.get(name) || [false, false, false, false];
+    const swTriggers = [false, false, false, false];
+    for (let i = 0; i < 4; i++) {
+      if (limitSw[i] && !prevSw[i]) {
+        swTriggers[i] = true;
+      }
+    }
+    scopeState.prevSwStates.set(name, [...limitSw]);
+
+    for (let m = 0; m < 4; m++) {
+      const key = `${name}_${m}`;
+      let buf = scopeState.buffers.get(key);
+      if (!buf) {
+        buf = [];
+        scopeState.buffers.set(key, buf);
+      }
+
+      const targetVal = targets[m] || 0.0;
+      const angleVal = angles[m] || 0.0;
+      const speedVal = speeds[m] || 0.0;
+
+      if (!scopeState.isPaused) {
+        buf.push({
+          time: now,
+          targetAngle: targetVal,
+          targetSpeed: targetVal,
+          angle: angleVal,
+          speed: speedVal,
+          errorAngle: targetVal - angleVal,
+          errorSpeed: targetVal - speedVal,
+          limitSw: [...limitSw],
+          swTriggers: [...swTriggers],
+        });
+
+        // 100Hz で保持する最大サンプル数
+        const limitCount = Math.max(150, scopeState.rangeSeconds * 120);
+        while (buf.length > limitCount) {
+          buf.shift();
+        }
+      }
+    }
+
+    if (name === scopeState.selectedModule) {
+      updateScopeIndicators(data);
+    }
+  }
+
+  function updateScopeIndicators(data) {
+    const m = scopeState.selectedMotor;
+    const isAngle = scopeState.selectedMetric === "angle";
+    const target = data.targets ? data.targets[m] : 0.0;
+    const actual = isAngle ? (data.angles ? data.angles[m] : 0.0) : (data.speeds ? data.speeds[m] : 0.0);
+    const err = target - actual;
+    const unit = isAngle ? "°" : " rps";
+
+    const lblTarget = document.getElementById("lbl-scope-target");
+    const lblActual = document.getElementById("lbl-scope-actual");
+    const lblError = document.getElementById("lbl-scope-error");
+
+    if (lblTarget) lblTarget.textContent = `${target.toFixed(1)}${unit}`;
+    if (lblActual) lblActual.textContent = `${actual.toFixed(1)}${unit}`;
+    if (lblError) lblError.textContent = `${(err > 0 ? "+" : "")}${err.toFixed(1)}${unit}`;
+
+    if (data.limit_switches) {
+      for (let i = 0; i < 4; i++) {
+        const badge = document.getElementById(`badge-scope-sw-${i}`);
+        if (badge) {
+          if (data.limit_switches[i]) {
+            badge.className = "badge badge-danger";
+            badge.style.boxShadow = "0 0 8px rgba(229, 20, 0, 0.6)";
+          } else {
+            badge.className = "badge badge-secondary";
+            badge.style.boxShadow = "none";
+          }
+        }
+      }
+    }
+  }
+
+  // --- Canvas オシロスコープ描画ループ ---
+  function renderScopeCanvas() {
+    const canvas = document.getElementById("scope-canvas");
+    if (!canvas) {
+      requestAnimationFrame(renderScopeCanvas);
+      return;
+    }
+
+    // 非アクティブビュー時は描画をスキップしてCPUを節約
+    const view = document.getElementById("view-telemetry");
+    if (!view || !view.classList.contains("active")) {
+      requestAnimationFrame(renderScopeCanvas);
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = rect.width;
+    const height = rect.height;
+
+    if (width === 0 || height === 0) {
+      requestAnimationFrame(renderScopeCanvas);
+      return;
+    }
+
+    if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+    }
+
+    const ctx = canvas.getContext("2d");
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    // 背景の塗りつぶし
+    ctx.fillStyle = "#121316";
+    ctx.fillRect(0, 0, width, height);
+
+    const mainHeight = height * 0.68;
+    const splitGap = 6;
+    const errTop = mainHeight + splitGap;
+    const errHeight = height - errTop;
+
+    const key = `${scopeState.selectedModule}_${scopeState.selectedMotor}`;
+    const buf = scopeState.buffers.get(key) || [];
+    const isAngle = scopeState.selectedMetric === "angle";
+
+    // 上段: 目標値 vs 実測値 ＆ リミットスイッチ縦線
+    drawMainScopeArea(ctx, 0, 0, width, mainHeight, buf, isAngle);
+
+    // 下段: 追従偏差波形
+    drawErrorScopeArea(ctx, 0, errTop, width, errHeight, buf, isAngle);
+
+    ctx.restore();
+    requestAnimationFrame(renderScopeCanvas);
+  }
+
+  function drawMainScopeArea(ctx, left, top, width, height, buf, isAngle) {
+    const padLeft = 45;
+    const padRight = 15;
+    const padTop = 15;
+    const padBottom = 20;
+    const plotW = width - padLeft - padRight;
+    const plotH = height - padTop - padBottom;
+
+    if (plotW <= 0 || plotH <= 0) return;
+
+    // Y軸レンジの自動算出
+    let minVal = -10.0;
+    let maxVal = 10.0;
+    if (buf.length > 0) {
+      for (const p of buf) {
+        const t = isAngle ? p.targetAngle : p.targetSpeed;
+        const a = isAngle ? p.angle : p.speed;
+        minVal = Math.min(minVal, t, a);
+        maxVal = Math.max(maxVal, t, a);
+      }
+    }
+    const margin = Math.max(5.0, (maxVal - minVal) * 0.15);
+    minVal -= margin;
+    maxVal += margin;
+    const valRange = maxVal - minVal || 1.0;
+
+    // 背景方眼グリッド線
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+
+    const gridRows = 5;
+    for (let i = 0; i <= gridRows; i++) {
+      const y = padTop + (plotH / gridRows) * i;
+      ctx.beginPath();
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(padLeft + plotW, y);
+      ctx.stroke();
+
+      const val = maxVal - (valRange / gridRows) * i;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.font = "10px Consolas, monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(val.toFixed(0), padLeft - 6, y + 3);
+    }
+
+    if (buf.length < 2) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("テレメトリ待機中...", padLeft + plotW / 2, padTop + plotH / 2);
+      return;
+    }
+
+    const latestTime = buf[buf.length - 1].time;
+    const startTime = latestTime - scopeState.rangeSeconds;
+
+    const timeToX = (t) => padLeft + Math.max(0, Math.min(plotW, ((t - startTime) / scopeState.rangeSeconds) * plotW));
+    const valToY = (v) => padTop + plotH - ((v - minVal) / valRange) * plotH;
+
+    // 1. 目標値ライン (水色 #4dc9f6)
+    ctx.strokeStyle = "#4dc9f6";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let started = false;
+    for (const p of buf) {
+      if (p.time < startTime) continue;
+      const x = timeToX(p.time);
+      const y = valToY(isAngle ? p.targetAngle : p.targetSpeed);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+
+    // 2. 実測値ライン (黄色 #fdd663)
+    ctx.strokeStyle = "#fdd663";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    started = false;
+    for (const p of buf) {
+      if (p.time < startTime) continue;
+      const x = timeToX(p.time);
+      const y = valToY(isAngle ? p.angle : p.speed);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+
+    // 3. リミットスイッチ立ち上がりイベントの縦線マーカー
+    for (const p of buf) {
+      if (p.time < startTime) continue;
+      if (p.swTriggers && p.swTriggers.some(Boolean)) {
+        const x = timeToX(p.time);
+
+        ctx.strokeStyle = "#f28b82";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, padTop);
+        ctx.lineTo(x, padTop + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // ラベル印字
+        for (let i = 0; i < 4; i++) {
+          if (p.swTriggers[i]) {
+            ctx.fillStyle = "#f28b82";
+            ctx.font = "bold 9px Consolas, monospace";
+            ctx.textAlign = "center";
+            ctx.fillText(`SW${i + 1} ON`, x, padTop + 10 + i * 11);
+          }
+        }
+      }
+    }
+  }
+
+  function drawErrorScopeArea(ctx, left, top, width, height, buf, isAngle) {
+    const padLeft = 45;
+    const padRight = 15;
+    const padTop = 10;
+    const padBottom = 15;
+    const plotW = width - padLeft - padRight;
+    const plotH = height - padTop - padBottom;
+
+    if (plotW <= 0 || plotH <= 0) return;
+
+    // 偏差レンジの算出 (0を中心に上下対称)
+    let maxAbsErr = 5.0;
+    if (buf.length > 0) {
+      for (const p of buf) {
+        const e = Math.abs(isAngle ? p.errorAngle : p.errorSpeed);
+        maxAbsErr = Math.max(maxAbsErr, e);
+      }
+    }
+    maxAbsErr = Math.ceil(maxAbsErr * 1.2);
+
+    const valToY = (err) => padTop + plotH / 2 - (err / maxAbsErr) * (plotH / 2);
+
+    // ゼロ基準線 (中央の白い実線)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    const zeroY = valToY(0);
+    ctx.beginPath();
+    ctx.moveTo(padLeft, zeroY);
+    ctx.lineTo(padLeft + plotW, zeroY);
+    ctx.stroke();
+
+    // Y軸目盛りラベル
+    ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+    ctx.font = "10px Consolas, monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(`+${maxAbsErr}`, padLeft - 6, padTop + 8);
+    ctx.fillText("0", padLeft - 6, zeroY + 3);
+    ctx.fillText(`-${maxAbsErr}`, padLeft - 6, padTop + plotH);
+
+    if (buf.length < 2) return;
+
+    const latestTime = buf[buf.length - 1].time;
+    const startTime = latestTime - scopeState.rangeSeconds;
+    const timeToX = (t) => padLeft + Math.max(0, Math.min(plotW, ((t - startTime) / scopeState.rangeSeconds) * plotW));
+
+    // 偏差ライン (緑色 #81c995)
+    ctx.strokeStyle = "#81c995";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started = false;
+    for (const p of buf) {
+      if (p.time < startTime) continue;
+      const x = timeToX(p.time);
+      const y = valToY(isAngle ? p.errorAngle : p.errorSpeed);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+  }
+
+  // --- スコープのイベントリスナー ---
+  if (selScopeModule) {
+    selScopeModule.addEventListener("change", (e) => {
+      scopeState.selectedModule = e.target.value;
+    });
+  }
+  if (selScopeMotor) {
+    selScopeMotor.addEventListener("change", (e) => {
+      scopeState.selectedMotor = parseInt(e.target.value, 10) || 0;
+    });
+  }
+  if (selScopeMetric) {
+    selScopeMetric.addEventListener("change", (e) => {
+      scopeState.selectedMetric = e.target.value;
+    });
+  }
+  if (selScopeRange) {
+    selScopeRange.addEventListener("change", (e) => {
+      scopeState.rangeSeconds = parseInt(e.target.value, 10) || 5;
+    });
+  }
+  if (btnScopePause) {
+    btnScopePause.addEventListener("click", () => {
+      scopeState.isPaused = !scopeState.isPaused;
+      if (scopeState.isPaused) {
+        btnScopePause.innerHTML = '<i class="fa-solid fa-play"></i> 再開';
+        btnScopePause.className = "btn btn-success btn-sm";
+      } else {
+        btnScopePause.innerHTML = '<i class="fa-solid fa-pause"></i> 一時停止';
+        btnScopePause.className = "btn btn-secondary btn-sm";
+      }
+    });
+  }
+
+  if (btnScopeExportCsv) {
+    btnScopeExportCsv.addEventListener("click", () => {
+      const key = `${scopeState.selectedModule}_${scopeState.selectedMotor}`;
+      const buf = scopeState.buffers.get(key) || [];
+      if (buf.length === 0) {
+        alert("エクスポート可能な波形データがありません。");
+        return;
+      }
+
+      const isAngle = scopeState.selectedMetric === "angle";
+      let csv = "time,target,actual,error,sw1,sw2,sw3,sw4\n";
+      for (const p of buf) {
+        const t = isAngle ? p.targetAngle : p.targetSpeed;
+        const a = isAngle ? p.angle : p.speed;
+        const e = isAngle ? p.errorAngle : p.errorSpeed;
+        const sw = p.limitSw || [false, false, false, false];
+        csv += `${p.time.toFixed(4)},${t.toFixed(2)},${a.toFixed(2)},${e.toFixed(2)},${sw[0]?1:0},${sw[1]?1:0},${sw[2]?1:0},${sw[3]?1:0}\n`;
+      }
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `telemetry_${scopeState.selectedModule}_M${scopeState.selectedMotor + 1}_${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  // 描画ループ起動
+  requestAnimationFrame(renderScopeCanvas);
 });

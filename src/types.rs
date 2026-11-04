@@ -92,6 +92,8 @@ pub struct MddFeedbackData {
     pub system_status: u8,
     pub angles: [f64; 4],
     pub speeds: [f64; 4],
+    #[serde(default)]
+    pub targets: [f64; 4],
 }
 
 impl Default for MddFeedbackData {
@@ -102,6 +104,7 @@ impl Default for MddFeedbackData {
             system_status: 0,
             angles: [0.0; 4],
             speeds: [0.0; 4],
+            targets: [0.0; 4],
         }
     }
 }

@@ -47,6 +47,9 @@
         <a href="#" class="menu-item" data-target="view-controller">
           <i class="fa-solid fa-gamepad"></i> Controller
         </a>
+        <a href="#" class="menu-item" data-target="view-telemetry">
+          <i class="fa-solid fa-chart-line"></i> Telemetry Scope
+        </a>
         <a href="#" class="menu-item" data-target="view-automation">
           <i class="fa-solid fa-puzzle-piece"></i> Automation (Block)
         </a>
@@ -375,6 +378,113 @@
                   <!-- 動的に追加されます -->
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ビュー: Telemetry Scope (オシロスコープ) -->
+      <section id="view-telemetry" class="content-view">
+        <div class="glass-card page-card" style="padding: 20px;">
+          <div class="console-header" style="flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+            <div>
+              <h2 style="margin: 0; font-size: 20px; display: flex; align-items: center; gap: 10px;">
+                <i class="fa-solid fa-chart-line" style="color: var(--color-primary);"></i>
+                リアルタイム波形モニター (Telemetry Scope)
+              </h2>
+              <p style="margin: 4px 0 0 0; font-size: 13px; color: var(--text-muted);">
+                目標値・実測値の追従性、制御偏差、およびリミットスイッチの動作タイミングをオシロスコープ波形としてリアルタイム観測します。
+              </p>
+            </div>
+
+            <!-- コントロール群 -->
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <label style="font-size: 12px; font-weight: 600;">対象モジュール:</label>
+                <select id="scope-module-select" class="form-input form-input-sm" style="min-width: 100px;">
+                  <option value="">検出中...</option>
+                </select>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <label style="font-size: 12px; font-weight: 600;">モータ:</label>
+                <select id="scope-motor-select" class="form-input form-input-sm" style="width: 70px;">
+                  <option value="0">M1</option>
+                  <option value="1">M2</option>
+                  <option value="2">M3</option>
+                  <option value="3">M4</option>
+                </select>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <label style="font-size: 12px; font-weight: 600;">指標:</label>
+                <select id="scope-metric-select" class="form-input form-input-sm" style="width: 120px;">
+                  <option value="angle">現在角度 [deg]</option>
+                  <option value="speed">現在速度 [rps]</option>
+                </select>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <label style="font-size: 12px; font-weight: 600;">時間幅:</label>
+                <select id="scope-range-select" class="form-input form-input-sm" style="width: 75px;">
+                  <option value="3">3秒</option>
+                  <option value="5" selected>5秒</option>
+                  <option value="10">10秒</option>
+                </select>
+              </div>
+
+              <button class="btn btn-secondary btn-sm" id="btn-scope-pause" style="white-space: nowrap;">
+                <i class="fa-solid fa-pause"></i> 一時停止
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-scope-export-csv" style="white-space: nowrap;">
+                <i class="fa-solid fa-file-csv"></i> CSV保存
+              </button>
+            </div>
+          </div>
+
+          <!-- デジタル数値インジケーターバー -->
+          <div class="scope-stats-bar" style="display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;">
+            <div class="scope-stat-card stat-target">
+              <span class="scope-stat-label">目標値 (Target)</span>
+              <span class="scope-stat-value" id="lbl-scope-target">0.0</span>
+            </div>
+            <div class="scope-stat-card stat-actual">
+              <span class="scope-stat-label">実測値 (Actual)</span>
+              <span class="scope-stat-value" id="lbl-scope-actual">0.0</span>
+            </div>
+            <div class="scope-stat-card stat-error">
+              <span class="scope-stat-label">追従偏差 (Error)</span>
+              <span class="scope-stat-value" id="lbl-scope-error">0.0</span>
+            </div>
+            <div class="scope-stat-card stat-sw">
+              <span class="scope-stat-label">リミットスイッチ状態</span>
+              <div style="display: flex; gap: 6px; margin-top: 4px;">
+                <span class="badge badge-secondary" id="badge-scope-sw-0">SW1</span>
+                <span class="badge badge-secondary" id="badge-scope-sw-1">SW2</span>
+                <span class="badge badge-secondary" id="badge-scope-sw-2">SW3</span>
+                <span class="badge badge-secondary" id="badge-scope-sw-3">SW4</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- オシロスコープ画面 (Canvas) -->
+          <div class="scope-canvas-container" style="position: relative; width: 100%; height: 520px; background: #121316; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1);">
+            <canvas id="scope-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+
+            <!-- 凡例オーバーレイ -->
+            <div class="scope-legend" style="position: absolute; top: 12px; left: 14px; display: flex; gap: 14px; font-size: 11px; background: rgba(0, 0, 0, 0.65); padding: 4px 10px; border-radius: 4px; pointer-events: none;">
+              <span style="color: #4dc9f6; display: flex; align-items: center; gap: 4px;">
+                <span style="display: inline-block; width: 14px; height: 3px; background: #4dc9f6;"></span> 目標値 (Target)
+              </span>
+              <span style="color: #fdd663; display: flex; align-items: center; gap: 4px;">
+                <span style="display: inline-block; width: 14px; height: 3px; background: #fdd663;"></span> 実測値 (Actual)
+              </span>
+              <span style="color: #81c995; display: flex; align-items: center; gap: 4px;">
+                <span style="display: inline-block; width: 14px; height: 3px; background: #81c995;"></span> 偏差 (Error)
+              </span>
+              <span style="color: #f28b82; display: flex; align-items: center; gap: 4px;">
+                <span style="display: inline-block; width: 12px; height: 1px; border-top: 2px dashed #f28b82;"></span> リミットSW ON
+              </span>
             </div>
           </div>
         </div>

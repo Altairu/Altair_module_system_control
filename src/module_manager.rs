@@ -559,13 +559,14 @@ impl ModuleManager {
                         }
                     }
 
-                    if let (Some(cache), Some(m)) = (
+                    if let (Some(mut cache), Some(m)) = (
                         g.mdd_feedback_cache.get(&base_id).cloned(),
                         g.config
                             .modules
                             .iter()
                             .find(|m| parse_hex_id(&m.base_id) == Some(base_id)),
                     ) {
+                        cache.targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
                         events_to_send.push(WsEvent::MddFeedback {
                             name: m.name.clone(),
                             data: cache,
@@ -583,13 +584,14 @@ impl ModuleManager {
                             decode_int16_le(data[6], data[7]) as f64 / 10.0,
                         ];
                     }
-                    if let (Some(cache), Some(m)) = (
+                    if let (Some(mut cache), Some(m)) = (
                         g.mdd_feedback_cache.get(&base_id).cloned(),
                         g.config
                             .modules
                             .iter()
                             .find(|m| parse_hex_id(&m.base_id) == Some(base_id)),
                     ) {
+                        cache.targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
                         events_to_send.push(WsEvent::MddFeedback {
                             name: m.name.clone(),
                             data: cache,
@@ -607,13 +609,14 @@ impl ModuleManager {
                             decode_int16_le(data[6], data[7]) as f64 / 100.0,
                         ];
                     }
-                    if let (Some(cache), Some(m)) = (
+                    if let (Some(mut cache), Some(m)) = (
                         g.mdd_feedback_cache.get(&base_id).cloned(),
                         g.config
                             .modules
                             .iter()
                             .find(|m| parse_hex_id(&m.base_id) == Some(base_id)),
                     ) {
+                        cache.targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
                         events_to_send.push(WsEvent::MddFeedback {
                             name: m.name.clone(),
                             data: cache,
