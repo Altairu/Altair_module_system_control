@@ -249,6 +249,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/connect", post(api_connect_usb))
         .route("/api/eth_can/config", get(api_eth_config))
         .route("/api/eth_can/connect", post(api_eth_connect))
+        .route("/api/eth_can/channel", post(api_eth_channel))
         .route("/api/eth_can/disconnect", post(api_eth_disconnect))
         .route("/api/start_control", post(api_start_control))
         .route("/api/behavior/start", post(api_behavior_start))
@@ -350,6 +351,7 @@ async fn api_eth_config(State(state): State<AppState>) -> impl IntoResponse {
 struct ConnectEthReq {
     target_ip: Option<String>,
     target_port: Option<u16>,
+    can_channel: Option<String>,
 }
 
 async fn api_eth_connect(
@@ -363,11 +365,16 @@ async fn api_eth_connect(
         .to_string();
     let port = req.target_port.unwrap_or(5000);
 
-    let (_, _, ch) = state.eth_bridge.get_config();
+    let (_, _, current_ch) = state.eth_bridge.get_config();
+    let ch = req
+        .can_channel
+        .map(|c| state.eth_bridge.set_can_channel(c))
+        .unwrap_or(current_ch);
+
     let net_cfg = NetworkConfig {
         target_ip: ip.clone(),
         target_port: port,
-        can_channel: ch,
+        can_channel: ch.clone(),
     };
     if let Ok(s) = serde_json::to_string_pretty(&net_cfg) {
         let _ = fs::write(&state.network_config_path, s);
@@ -377,7 +384,7 @@ async fn api_eth_connect(
     *state.active_mode.lock().unwrap() = "eth".to_string();
 
     let eth = state.eth_bridge.clone();
-    let res = tokio::task::spawn_blocking(move || eth.connect(ip, port))
+    let res = tokio::task::spawn_blocking(move || eth.connect(ip, port, Some(ch)))
         .await
         .unwrap_or_else(|e| Err(format!("スレッドエラー: {}", e)));
 
@@ -385,6 +392,37 @@ async fn api_eth_connect(
         Ok(msg) => Json(json!({ "success": true, "message": msg })),
         Err(err) => Json(json!({ "success": false, "message": err })),
     }
+}
+
+#[derive(Deserialize)]
+struct SetEthChannelReq {
+    can_channel: String,
+}
+
+async fn api_eth_channel(
+    State(state): State<AppState>,
+    Json(req): Json<SetEthChannelReq>,
+) -> impl IntoResponse {
+    let ch = state.eth_bridge.set_can_channel(req.can_channel);
+    let (ip, port, _) = state.eth_bridge.get_config();
+    let net_cfg = NetworkConfig {
+        target_ip: ip,
+        target_port: port,
+        can_channel: ch.clone(),
+    };
+    if let Ok(s) = serde_json::to_string_pretty(&net_cfg) {
+        let _ = fs::write(&state.network_config_path, s);
+    }
+    let ch_label = match ch.as_str() {
+        "can2" => "CAN2",
+        "both" => "CAN1 + CAN2",
+        _ => "CAN1",
+    };
+    Json(json!({
+        "success": true,
+        "can_channel": ch,
+        "message": format!("Ethernet-CAN の使用チャンネルを {} に設定しました。", ch_label)
+    }))
 }
 
 async fn api_eth_disconnect(State(state): State<AppState>) -> impl IntoResponse {

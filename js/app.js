@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
     panelConnUsb: document.getElementById("panel-conn-usb"),
     txtEthIp: document.getElementById("txt-eth-ip"),
     txtEthPort: document.getElementById("txt-eth-port"),
+    selEthCanChannel: document.getElementById("sel-eth-can-channel"),
     btnConnectEth: document.getElementById("btn-connect-eth"),
     btnDisconnectEth: document.getElementById("btn-disconnect-eth"),
     chkAutoConnect: document.getElementById("chk-auto-connect"),
@@ -1492,25 +1493,47 @@ document.addEventListener("DOMContentLoaded", () => {
       const cfg = await res.json();
       if (cfg.target_ip && el.txtEthIp) el.txtEthIp.value = cfg.target_ip;
       if (cfg.target_port && el.txtEthPort) el.txtEthPort.value = cfg.target_port;
+      if (cfg.can_channel && el.selEthCanChannel) el.selEthCanChannel.value = cfg.can_channel;
     } catch (e) {
       // 読み込み失敗時は初期値を維持
     }
   }
   loadEthCanConfig();
 
+  // Ethernet-CAN チャンネル切り替え (接続中も即座に反映)
+  if (el.selEthCanChannel) {
+    el.selEthCanChannel.addEventListener("change", async () => {
+      const ch = el.selEthCanChannel.value;
+      try {
+        const res = await fetch("/api/eth_can/channel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ can_channel: ch })
+        });
+        const data = await res.json();
+        if (data.success) {
+          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+        }
+      } catch (err) {
+        appendTerminalLog(el.behaviorTerminal, `[ERROR] チャンネル切替に失敗しました: ${err}`, "error-msg");
+      }
+    });
+  }
+
   // Ethernet-CAN 接続ボタン
   if (el.btnConnectEth) {
     el.btnConnectEth.addEventListener("click", async () => {
       const ip = el.txtEthIp.value.trim();
       const port = parseInt(el.txtEthPort.value.trim(), 10) || 5000;
+      const canChannel = el.selEthCanChannel ? el.selEthCanChannel.value : "can1";
 
-      appendTerminalLog(el.behaviorTerminal, `Ethernet-CAN (${ip}:${port}) への接続要求を送信中...`);
+      appendTerminalLog(el.behaviorTerminal, `Ethernet-CAN (${ip}:${port} / ${canChannel.toUpperCase()}) への接続要求を送信中...`);
 
       try {
         const res = await fetch("/api/eth_can/connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target_ip: ip, target_port: port })
+          body: JSON.stringify({ target_ip: ip, target_port: port, can_channel: canChannel })
         });
         const data = await res.json();
         if (data.success) {

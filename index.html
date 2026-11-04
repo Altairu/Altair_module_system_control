@@ -136,6 +136,11 @@
               <div style="display: flex; gap: 6px; margin-bottom: 8px;">
                 <input type="text" id="txt-eth-ip" class="form-input" style="flex: 2; font-size: 13px;" placeholder="192.168.2.123" value="192.168.2.123">
                 <input type="number" id="txt-eth-port" class="form-input" style="flex: 1; font-size: 13px;" placeholder="5000" value="5000">
+                <select id="sel-eth-can-channel" class="form-input" style="flex: 1.1; font-size: 13px;" title="使用するCANチャンネル (CAN1 / CAN2 / 両方)">
+                  <option value="can1">CAN1</option>
+                  <option value="can2">CAN2</option>
+                  <option value="both">CAN1+2</option>
+                </select>
               </div>
               <div class="btn-row">
                 <button class="btn btn-primary" id="btn-connect-eth"><i class="fa-solid fa-plug"></i> Connect ETH</button>

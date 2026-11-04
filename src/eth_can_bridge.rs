@@ -81,19 +81,40 @@ impl EthCanBridge {
         can_id >= 0x200 && sub_id < 0x20
     }
 
+    fn normalize_channel(ch: &str) -> String {
+        match ch.trim().to_ascii_lowercase().as_str() {
+            "can2" => "can2".to_string(),
+            "both" => "both".to_string(),
+            _ => "can1".to_string(),
+        }
+    }
+
+    fn format_active_port(ip: &str, port: u16, ch: &str) -> String {
+        let ch_label = match ch {
+            "can2" => "CAN2",
+            "both" => "CAN1+2",
+            _ => "CAN1",
+        };
+        format!("{}:{} [{}]", ip, port, ch_label)
+    }
+
     /// 現在の接続ステータスを取得
     pub fn get_status(&self) -> CanStatusEvent {
         let guard = self.inner.lock().unwrap();
         CanStatusEvent {
             is_connected: guard.is_connected,
-            active_port: format!("{}:{}", guard.target_ip, guard.target_port),
+            active_port: Self::format_active_port(
+                &guard.target_ip,
+                guard.target_port,
+                &guard.can_channel,
+            ),
             bitrate: 1_000_000,
             error_message: guard.last_error.clone(),
             mode: "eth".to_string(),
         }
     }
 
-    /// 現在のターゲットIPとポートを取得
+    /// 現在のターゲットIP・ポート・CANチャンネルを取得
     pub fn get_config(&self) -> (String, u16, String) {
         let guard = self.inner.lock().unwrap();
         (
@@ -103,17 +124,49 @@ impl EthCanBridge {
         )
     }
 
+    /// 使用するCANチャンネル (can1 / can2 / both) を変更
+    pub fn set_can_channel(&self, channel: String) -> String {
+        let normalized = Self::normalize_channel(&channel);
+        let status = {
+            let mut guard = self.inner.lock().unwrap();
+            guard.can_channel = normalized.clone();
+            guard.tx_queue.clear();
+            CanStatusEvent {
+                is_connected: guard.is_connected,
+                active_port: Self::format_active_port(
+                    &guard.target_ip,
+                    guard.target_port,
+                    &guard.can_channel,
+                ),
+                bitrate: 1_000_000,
+                error_message: guard.last_error.clone(),
+                mode: "eth".to_string(),
+            }
+        };
+        let _ = self.ws_tx.send(WsEvent::CanStatus { data: status });
+        normalized
+    }
+
     /// 接続要求
-    pub fn connect(&self, ip: String, port: u16) -> Result<String, String> {
-        {
+    pub fn connect(
+        &self,
+        ip: String,
+        port: u16,
+        can_channel: Option<String>,
+    ) -> Result<String, String> {
+        let ch_norm = {
             let mut guard = self.inner.lock().unwrap();
             guard.target_ip = ip.clone();
             guard.target_port = port;
+            if let Some(ch) = can_channel {
+                guard.can_channel = Self::normalize_channel(&ch);
+            }
             guard.auto_reconnect = true;
             guard.force_disconnect = false;
             guard.force_reconnect = true;
             guard.tx_queue.clear();
-        }
+            guard.can_channel.clone()
+        };
 
         // ワーカーが接続を試行するのを待機して結果を返す
         let start = Instant::now();
@@ -122,8 +175,10 @@ impl EthCanBridge {
             let guard = self.inner.lock().unwrap();
             if guard.is_connected && !guard.force_reconnect {
                 return Ok(format!(
-                    "Ethernet-CAN 基板 ({}:{}) へ接続しました。",
-                    ip, port
+                    "Ethernet-CAN 基板 ({}:{} / {}) へ接続しました。",
+                    ip,
+                    port,
+                    ch_norm.to_uppercase()
                 ));
             }
             if !guard.force_reconnect && !guard.last_error.is_empty() {
@@ -134,8 +189,10 @@ impl EthCanBridge {
         let guard = self.inner.lock().unwrap();
         if guard.is_connected {
             Ok(format!(
-                "Ethernet-CAN 基板 ({}:{}) へ接続しました。",
-                ip, port
+                "Ethernet-CAN 基板 ({}:{} / {}) へ接続しました。",
+                ip,
+                port,
+                ch_norm.to_uppercase()
             ))
         } else {
             Err(if guard.last_error.is_empty() {
@@ -169,18 +226,32 @@ impl EthCanBridge {
         }
 
         let dlc = data.len().min(8);
-        let send_to_can2 = if guard.can_channel == "can2" {
-            true
-        } else {
-            guard.can_channel == "both" && channel == "can2"
+        let send_to_can1 = match guard.can_channel.as_str() {
+            "can1" => true,
+            "can2" => false,
+            "both" => channel != "can2",
+            _ => true,
+        };
+        let send_to_can2 = match guard.can_channel.as_str() {
+            "can2" => true,
+            "both" => true,
+            _ => false,
         };
 
         let mut payload = [0u8; ANALYZER_TX_SIZE];
-        let base_offset = if send_to_can2 { 10 } else { 0 };
-        payload[base_offset] = ((standard_id >> 8) & 0xFF) as u8;
-        payload[base_offset + 1] = (standard_id & 0xFF) as u8;
-        for i in 0..dlc {
-            payload[base_offset + 2 + i] = data[i];
+        if send_to_can1 {
+            payload[0] = ((standard_id >> 8) & 0xFF) as u8;
+            payload[1] = (standard_id & 0xFF) as u8;
+            for i in 0..dlc {
+                payload[2 + i] = data[i];
+            }
+        }
+        if send_to_can2 {
+            payload[10] = ((standard_id >> 8) & 0xFF) as u8;
+            payload[11] = (standard_id & 0xFF) as u8;
+            for i in 0..dlc {
+                payload[12 + i] = data[i];
+            }
         }
 
         let is_config_frame = Self::is_config_can_id(standard_id);
@@ -279,7 +350,11 @@ impl EthCanBridge {
                         g.is_connected = false;
                         CanStatusEvent {
                             is_connected: false,
-                            active_port: format!("{}:{}", g.target_ip, g.target_port),
+                            active_port: Self::format_active_port(
+                                &g.target_ip,
+                                g.target_port,
+                                &g.can_channel,
+                            ),
                             bitrate: 1_000_000,
                             error_message: String::new(),
                             mode: "eth".to_string(),
@@ -325,7 +400,11 @@ impl EthCanBridge {
                                 g.last_error.clear();
                                 CanStatusEvent {
                                     is_connected: true,
-                                    active_port: format!("{}:{}", g.target_ip, g.target_port),
+                                    active_port: Self::format_active_port(
+                                        &g.target_ip,
+                                        g.target_port,
+                                        &g.can_channel,
+                                    ),
                                     bitrate: 1_000_000,
                                     error_message: String::new(),
                                     mode: "eth".to_string(),
@@ -492,7 +571,11 @@ impl EthCanBridge {
                         g.last_error = err;
                         CanStatusEvent {
                             is_connected: false,
-                            active_port: format!("{}:{}", g.target_ip, g.target_port),
+                            active_port: Self::format_active_port(
+                                &g.target_ip,
+                                g.target_port,
+                                &g.can_channel,
+                            ),
                             bitrate: 1_000_000,
                             error_message: g.last_error.clone(),
                             mode: "eth".to_string(),
