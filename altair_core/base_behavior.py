@@ -188,6 +188,7 @@ class GamepadState:
     def __init__(self):
         self.axes = [0.0] * 8
         self.buttons = [False] * 16
+        self.last_updated = 0.0
 
     def get_button(self, index):
         if 0 <= index < len(self.buttons):
@@ -198,6 +199,9 @@ class GamepadState:
         if 0 <= index < len(self.axes):
             return float(self.axes[index])
         return 0.0
+
+    def is_connected(self, timeout=1.0):
+        return (time.monotonic() - self.last_updated) < timeout
 
 
 class MddClient:
@@ -323,9 +327,15 @@ class AltairBehavior:
         try:
             msg = json.loads(text)
             mtype = msg.get("type")
-            if mtype == "gamepad_state":
+            if mtype in ("gamepad_state", "gamepad_input"):
                 self.gamepad.axes = msg.get("axes", [])
                 self.gamepad.buttons = msg.get("buttons", [])
+                self.gamepad.last_updated = time.monotonic()
+                if hasattr(self, "_gamepad_callback"):
+                    try:
+                        self._gamepad_callback(msg)
+                    except Exception:
+                        pass
             elif mtype == "mdd_feedback":
                 name = msg.get("name")
                 data = msg.get("data", {})
@@ -421,6 +431,30 @@ class AltairBehavior:
             pass
         finally:
             self.destroy_node()
+
+    def request_start_control(self, timeout_sec=2.0):
+        """
+        Webサーバーの /api/start_control にパラメータ一括送信と制御開始を要求します。
+        """
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:8000/api/start_control",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=timeout_sec) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                if data.get("success"):
+                    self.get_logger().info(f"制御開始要求に成功しました: {data.get('message', '')}")
+                    return True
+                else:
+                    self.get_logger().warn(f"制御開始要求が拒否されました: {data.get('message', '')}")
+                    return False
+        except Exception as e:
+            self.get_logger().warn(f"制御開始要求の送信に失敗しました: {e}")
+            return False
 
     def destroy_node(self):
         if self._ws:

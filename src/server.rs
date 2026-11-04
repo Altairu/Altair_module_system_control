@@ -877,7 +877,7 @@ async fn handle_ws_client(socket: WebSocket, state: AppState) {
                             mm.set_solenoid_command(name, &valves);
                         }
                     }
-                    "gamepad_input" => {
+                    "gamepad_input" | "gamepad_state" => {
                         let buttons: Vec<bool> = val
                             .get("buttons")
                             .and_then(|v| v.as_array())

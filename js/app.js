@@ -1436,6 +1436,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const prevStatus = state.mddStatuses[name];
       state.mddStatuses[name] = data.system_status;
 
+      if (!state.mddZeroCounts) state.mddZeroCounts = {};
+      if (data.system_status === 0) {
+        state.mddZeroCounts[name] = (state.mddZeroCounts[name] || 0) + 1;
+      } else {
+        state.mddZeroCounts[name] = 0;
+      }
+
       if (!state.isSendingParams) {
         const mddModules = (state.config?.modules || []).filter(m => m.type === "mdd");
         const allRunning = mddModules.length > 0 && mddModules.every(m => state.mddStatuses[m.name] === 1);
@@ -1445,7 +1452,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (el.lblControlModeStatus) {
             el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">制御実行中 (Control Mode)</span>';
           }
-        } else if (data.system_status === 0 && (state.controlMode === "CONTROL" || prevStatus === 1)) {
+        } else if (data.system_status === 0 && (state.mddZeroCounts[name] >= 10) && (state.controlMode === "CONTROL" || prevStatus === 1)) {
           state.controlMode = "SETUP";
           if (el.lblControlModeStatus) {
             el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';

@@ -176,11 +176,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // ボタンの押し下げ状態の取得
     const buttonsData = gp.buttons.map(b => b.pressed);
 
-    // WebSocket経由で操縦PC(ROS2ノード)へ送信
+    // WebSocket経由で操縦PC(ROS2ノード / Pythonスクリプト)へ送信
     const mainWs = window.appWs || window.parent.appWs;
     if (mainWs && mainWs.readyState === WebSocket.OPEN) {
       mainWs.send(JSON.stringify({
-        type: "gamepad_state",
+        type: "gamepad_input",
         axes: axesData,
         buttons: buttonsData
       }));

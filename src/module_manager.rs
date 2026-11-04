@@ -33,6 +33,7 @@ struct ManagerInner {
     mdd_feedback_cache: HashMap<u16, MddFeedbackData>,
     mdd_param_sent_at: HashMap<u16, Instant>,
     mdd_param_confirmed: HashMap<u16, bool>,
+    mdd_zero_status_count: HashMap<u16, u32>,
     send_session_id: u64,
     is_running: bool,
     is_sending_params: bool,
@@ -64,6 +65,7 @@ impl ModuleManager {
                 mdd_feedback_cache: HashMap::new(),
                 mdd_param_sent_at: HashMap::new(),
                 mdd_param_confirmed: HashMap::new(),
+                mdd_zero_status_count: HashMap::new(),
                 send_session_id: 0,
                 is_running: false,
                 is_sending_params: false,
@@ -479,6 +481,7 @@ impl ModuleManager {
                         continue;
                     }
                     let status_byte = data[5];
+                    let error_code = data[4];
                     let is_running = g.is_running;
                     let is_sending = g.is_sending_params;
 
@@ -490,17 +493,22 @@ impl ModuleManager {
                             data[2] != 0,
                             data[3] != 0,
                         ];
-                        cache.error_code = data[4];
+                        cache.error_code = error_code;
                         cache.system_status = status_byte;
                     }
 
                     if status_byte == 1 {
+                        g.mdd_zero_status_count.insert(base_id, 0);
                         // パラメータ送信トリガ以降の status == 1 応答をもって設定完了と判定
                         if g.mdd_param_sent_at.contains_key(&base_id) || is_sending {
                             g.mdd_param_confirmed.insert(base_id, true);
                         }
                     } else {
                         // 待機状態 (status == 0)
+                        let zero_cnt = g.mdd_zero_status_count.entry(base_id).or_insert(0);
+                        *zero_cnt += 1;
+                        let count = *zero_cnt;
+
                         // パラメータ送信中にインフライトで届いた古い status == 0 フレームで
                         // mdd_param_sent_at を消去してしまうと以降の status == 1 を認識できなくなるため保持する
                         if is_sending {
@@ -510,11 +518,19 @@ impl ModuleManager {
                                 }
                             }
                         } else {
-                            let was_confirmed =
-                                g.mdd_param_confirmed.insert(base_id, false).unwrap_or(false);
-                            g.mdd_param_sent_at.remove(&base_id);
-                            if is_running && was_confirmed {
-                                reset_detected = true;
+                            // パラメータ送信直後の過渡期（1.5秒以内）はリセット誤判定を抑制
+                            let sent_at = g.mdd_param_sent_at.get(&base_id).copied();
+                            let in_grace_period = sent_at
+                                .map(|t| t.elapsed() < Duration::from_millis(1500))
+                                .unwrap_or(false);
+
+                            // 単発ノイズによる誤検知を防ぐため、10回連続(約100ms)かつ猶予期間外のみリセットと判定
+                            if !in_grace_period && count >= 10 {
+                                let was_confirmed =
+                                    g.mdd_param_confirmed.insert(base_id, false).unwrap_or(false);
+                                if is_running && was_confirmed {
+                                    reset_detected = true;
+                                }
                             }
                         }
                     }
@@ -527,10 +543,17 @@ impl ModuleManager {
                             .iter()
                             .find(|m| parse_hex_id(&m.base_id) == Some(base_id))
                         {
+                            let err_desc = match error_code {
+                                0x00 => "正常待機 (0x00)",
+                                0x01 => "初期化タイムアウト (0x01: INIT_TIMEOUT)",
+                                0x02 => "CAN受信途絶タイムアウト (0x02: CAN_RX_TIMEOUT)",
+                                0x04 => "CAN送信失敗 (0x04: CAN_TX_FAIL)",
+                                other => &format!("エラーコード (0x{:02X})", other),
+                            };
                             events_to_send.push(WsEvent::BehaviorLog {
                                 data: format!(
-                                    "[WARN] マイコン '{}' の待機状態へのリセットを検知したため、PC側の制御フラグを安全にリセットしました。",
-                                    m.name
+                                    "[WARN] マイコン '{}' の待機状態へのリセットを検知しました (エラー要因: {})。PC側の制御フラグを安全にリセットしました。",
+                                    m.name, err_desc
                                 ),
                             });
                         }
