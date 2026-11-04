@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
@@ -11,7 +11,7 @@ use crate::types::WsEvent;
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+pub const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 struct RunnerInner {
     child: Option<Child>,
@@ -181,6 +181,9 @@ impl BehaviorRunner {
             return Err(format!("スクリプトが見つかりません: {}", safe_name));
         }
 
+        // 起動前の自動構文チェック (Syntax Pre-flight Check)
+        self.check_syntax(&script_path)?;
+
         let mut cmd = Command::new("python");
         cmd.arg("-u")
             .arg(&script_path)
@@ -284,6 +287,52 @@ impl BehaviorRunner {
             g.status = "IDLE".to_string();
             "実行中のスクリプトはありません。".to_string()
         }
+    }
+
+    /// 実行前構文チェック (Syntax check)
+    pub fn check_syntax(&self, script_path: &Path) -> Result<(), String> {
+        let mut cmd = Command::new("python");
+        cmd.arg("-m")
+            .arg("py_compile")
+            .arg(script_path)
+            .current_dir(&self.project_root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        match cmd.output() {
+            Ok(output) => {
+                if !output.status.success() {
+                    let err = String::from_utf8_lossy(&output.stderr).to_string();
+                    let clean = err.trim().to_string();
+                    return Err(format!("スクリプト構文エラーのため起動を中止しました:\n{}", clean));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("[WARN] 構文チェックコマンドの実行に失敗しました: {}", e);
+                Ok(())
+            }
+        }
+    }
+
+    /// スクリプトコードの読み込み
+    pub fn get_behavior_code(&self, name: &str) -> Result<String, String> {
+        let safe = Self::sanitize_py_filename(name)?;
+        let path = self.behaviors_dir.join(&safe);
+        if !path.exists() {
+            return Err(format!("スクリプトが見つかりません: {}", safe));
+        }
+        fs::read_to_string(&path).map_err(|e| format!("ファイル読み込み失敗: {}", e))
+    }
+
+    /// スクリプトコードの保存
+    pub fn save_behavior_code(&self, name: &str, content: &str) -> Result<(), String> {
+        let safe = Self::sanitize_py_filename(name)?;
+        let path = self.behaviors_dir.join(&safe);
+        fs::write(&path, content).map_err(|e| format!("ファイル保存失敗: {}", e))
     }
 }
 

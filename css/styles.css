@@ -1808,3 +1808,109 @@ body {
   color: #e8eaed;
   letter-spacing: 0.3px;
 }
+
+/* --- 14. スタックトレースリンク ＆ コードエディタモーダル --- */
+.traceback-link {
+  color: #fdd663;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(253, 214, 99, 0.15);
+  font-weight: 600;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.traceback-link:hover {
+  background: rgba(253, 214, 99, 0.35);
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(253, 214, 99, 0.4);
+}
+
+.traceback-link i {
+  font-size: 11px;
+}
+
+.code-editor-modal-card {
+  max-width: 960px;
+  width: 94vw;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-editor-container {
+  display: flex;
+  flex-grow: 1;
+  position: relative;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 20px;
+  background: #1e1e1e;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-linenums-column {
+  width: 55px;
+  padding: 12px 0;
+  background: #252526;
+  color: #858585;
+  text-align: right;
+  user-select: none;
+  overflow-y: hidden;
+  border-right: 1px solid #333333;
+}
+
+.code-linenums-column .linenum-item {
+  height: 20px;
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+.code-linenums-column .linenum-item.error-line {
+  background: #e51400;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.code-textarea-container {
+  flex-grow: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.code-editor-textarea {
+  width: 100%;
+  height: 100%;
+  padding: 12px 12px;
+  background: transparent;
+  color: #d4d4d4;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+  box-sizing: border-box;
+}
+
+.code-highlight-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: rgba(229, 20, 0, 0.25);
+  border-left: 4px solid #e51400;
+  pointer-events: none;
+  transition: top 0.15s ease;
+  z-index: 1;
+}

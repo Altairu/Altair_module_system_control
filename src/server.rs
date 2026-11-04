@@ -15,10 +15,17 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+use crate::behavior_runner::CREATE_NO_WINDOW;
 
 // ビルド時にexeへ埋め込むUIファイル
 const INDEX_HTML: &str = include_str!("../index.html");
@@ -259,6 +266,11 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/behavior/open_folder", post(api_behavior_open_folder))
         .route("/api/behavior/create", post(api_behavior_create))
         .route("/api/behavior/delete", post(api_behavior_delete))
+        .route(
+            "/api/behavior/code",
+            get(api_behavior_get_code).post(api_behavior_save_code),
+        )
+        .route("/api/behavior/open_vscode", post(api_behavior_open_vscode))
         .route(
             "/api/behavior/get_blockly_workspace",
             get(api_get_blockly_workspace),
@@ -564,6 +576,88 @@ async fn api_behavior_delete(
             StatusCode::BAD_REQUEST,
             Json(json!({ "success": false, "message": err })),
         ),
+    }
+}
+
+#[derive(Deserialize)]
+struct GetBehaviorCodeQuery {
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct SaveBehaviorCodeReq {
+    name: String,
+    code: String,
+}
+
+#[derive(Deserialize)]
+struct OpenVscodeReq {
+    name: String,
+    #[serde(default)]
+    line: Option<usize>,
+}
+
+async fn api_behavior_get_code(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<GetBehaviorCodeQuery>,
+) -> impl IntoResponse {
+    match state.behavior_runner.get_behavior_code(&q.name) {
+        Ok(code) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "name": q.name, "code": code })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "message": err })),
+        ),
+    }
+}
+
+async fn api_behavior_save_code(
+    State(state): State<AppState>,
+    Json(req): Json<SaveBehaviorCodeReq>,
+) -> impl IntoResponse {
+    match state.behavior_runner.save_behavior_code(&req.name, &req.code) {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "message": format!("スクリプト '{}' を保存しました。", req.name)
+            })),
+        ),
+        Err(err) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "message": err })),
+        ),
+    }
+}
+
+async fn api_behavior_open_vscode(
+    State(state): State<AppState>,
+    Json(req): Json<OpenVscodeReq>,
+) -> impl IntoResponse {
+    let script_path = state.behavior_runner.get_behaviors_dir().join(&req.name);
+    let target = if let Some(line) = req.line {
+        format!("{}:{}", script_path.to_string_lossy(), line)
+    } else {
+        script_path.to_string_lossy().to_string()
+    };
+
+    let mut cmd = Command::new("cmd");
+    cmd.args(&["/c", "code", "-g", &target]);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    match cmd.spawn() {
+        Ok(_) => Json(json!({
+            "success": true,
+            "message": format!("VSCodeで開きました: {}", target)
+        })),
+        Err(e) => Json(json!({
+            "success": false,
+            "message": format!("VSCodeの起動に失敗しました: {}", e)
+        })),
     }
 }
 

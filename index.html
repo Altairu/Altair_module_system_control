@@ -441,6 +441,9 @@
                 <option value="">読み込み中...</option>
               </select>
               <div style="display: flex; gap: 6px; margin-top: 8px;">
+                <button class="btn btn-secondary btn-xs" id="btn-view-behavior-code" style="flex: 1;" title="スクリプトコードを表示・編集">
+                  <i class="fa-solid fa-code"></i> コード編集
+                </button>
                 <button class="btn btn-secondary btn-xs" id="btn-refresh-behavior-list" style="flex: 1;">
                   <i class="fa-solid fa-rotate-right"></i> 一覧更新
                 </button>
@@ -715,6 +718,45 @@
           <i class="fa-solid fa-trash-can"></i> アプリをアンインストール
         </button>
         <button class="btn btn-primary" id="btn-ok-help-modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- スクリプトコードエディタ / ビューアモーダル -->
+  <div class="modal-overlay" id="code-editor-modal" style="display: none;">
+    <div class="modal-card glass-card code-editor-modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <h2 style="font-size: 16px; margin: 0; display: flex; align-items: center; gap: 8px;">
+            <i class="fa-solid fa-code" style="color: var(--color-primary);"></i>
+            <span id="code-editor-filename">script.py</span>
+          </h2>
+          <span class="badge badge-secondary" id="code-editor-line-badge" style="display: none;">line 0</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-secondary btn-xs" id="btn-editor-open-vscode" title="VSCodeで該当行を開く">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> VSCodeで開く
+          </button>
+          <button class="btn btn-primary btn-xs" id="btn-editor-save" title="コードを保存 (Ctrl+S)">
+            <i class="fa-solid fa-floppy-disk"></i> 保存
+          </button>
+          <button class="modal-close-btn" id="btn-close-code-editor">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body" style="padding: 10px; flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+        <div class="code-editor-container">
+          <div class="code-linenums-column" id="code-editor-linenums"></div>
+          <div class="code-textarea-container">
+            <div class="code-highlight-overlay" id="code-editor-highlight" style="display: none; top: 0px;"></div>
+            <textarea class="code-editor-textarea" id="code-editor-textarea" spellcheck="false" placeholder="コード読み込み中..."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <div id="code-editor-status-text" style="font-size: 12px; color: var(--text-muted);">
+          Ctrl+S で保存できます。
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-cancel-code-editor">閉じる</button>
       </div>
     </div>
   </div>

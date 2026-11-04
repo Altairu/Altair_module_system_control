@@ -779,7 +779,31 @@ document.addEventListener("DOMContentLoaded", () => {
   function appendTerminalLog(terminal, text, className = "") {
     const line = document.createElement("div");
     line.className = `terminal-line ${className}`;
-    line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+
+    const timestamp = `[${new Date().toLocaleTimeString()}] `;
+
+    // Python スタックトレースのパターン検出:
+    // 例: File "C:\path\to\script.py", line 481, in <module>
+    const traceRegex = /File\s+"([^"]+)",\s+line\s+(\d+)/;
+
+    if (traceRegex.test(text)) {
+      const escapeHtml = (str) =>
+        str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+      const rawEscaped = escapeHtml(text);
+      const replaced = rawEscaped.replace(
+        /File\s+&quot;([^&]+)&quot;,\s+line\s+(\d+)(?:,\s+in\s+([^<\r\n]+|&lt;[^&]+&gt;))?/g,
+        (match, filePath, lineNum, funcName) => {
+          const fileName = filePath.replace(/\\/g, "/").split("/").pop();
+          const fnPart = funcName ? `, in ${funcName}` : "";
+          return `<span class="traceback-link" data-file="${fileName}" data-line="${lineNum}" title="クリックして ${fileName} の ${lineNum} 行目をエディタで確認"><i class="fa-solid fa-code"></i> File "${fileName}", line ${lineNum}${fnPart}</span>`;
+        }
+      );
+      line.innerHTML = `<span style="opacity: 0.6;">${timestamp}</span>${replaced}`;
+    } else {
+      line.textContent = `${timestamp}${text}`;
+    }
+
     terminal.appendChild(line);
 
     // 最大300行に制限
@@ -1820,6 +1844,198 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // --- スクリプトコードエディタ ＆ スタックトレース該当行ジャンプ機能 ---
+  let currentEditorFile = "";
+  let currentEditorLine = 0;
+
+  const btnViewBehaviorCode = document.getElementById("btn-view-behavior-code");
+  const codeEditorModal = document.getElementById("code-editor-modal");
+  const codeEditorFilename = document.getElementById("code-editor-filename");
+  const codeEditorLineBadge = document.getElementById("code-editor-line-badge");
+  const codeEditorTextarea = document.getElementById("code-editor-textarea");
+  const codeEditorLinenums = document.getElementById("code-editor-linenums");
+  const codeEditorHighlight = document.getElementById("code-editor-highlight");
+  const codeEditorStatusText = document.getElementById("code-editor-status-text");
+  const btnCloseCodeEditor = document.getElementById("btn-close-code-editor");
+  const btnCancelCodeEditor = document.getElementById("btn-cancel-code-editor");
+  const btnEditorSave = document.getElementById("btn-editor-save");
+  const btnEditorOpenVscode = document.getElementById("btn-editor-open-vscode");
+
+  async function openCodeEditorModal(fileName, lineNum = 0) {
+    if (!fileName) {
+      fileName = el.selBehaviorScript ? el.selBehaviorScript.value : "";
+    }
+    if (!fileName) {
+      alert("表示するスクリプトファイルを選択してください。");
+      return;
+    }
+
+    const baseName = fileName.replace(/\\/g, "/").split("/").pop();
+    currentEditorFile = baseName;
+    currentEditorLine = parseInt(lineNum, 10) || 0;
+
+    if (codeEditorFilename) codeEditorFilename.textContent = baseName;
+    if (codeEditorLineBadge) {
+      if (currentEditorLine > 0) {
+        codeEditorLineBadge.textContent = `line ${currentEditorLine}`;
+        codeEditorLineBadge.style.display = "inline-block";
+      } else {
+        codeEditorLineBadge.style.display = "none";
+      }
+    }
+    if (codeEditorTextarea) codeEditorTextarea.value = "# コードを読み込み中...";
+    if (codeEditorModal) codeEditorModal.style.display = "flex";
+
+    try {
+      const res = await fetch(`/api/behavior/code?name=${encodeURIComponent(baseName)}`);
+      const data = await res.json();
+      if (!data.success) {
+        if (codeEditorTextarea) codeEditorTextarea.value = `# エラー: ${data.message}`;
+        return;
+      }
+
+      if (codeEditorTextarea) {
+        codeEditorTextarea.value = data.code;
+        updateLineNumbers(data.code, currentEditorLine);
+        setTimeout(() => {
+          scrollToEditorLine(currentEditorLine);
+        }, 50);
+      }
+      if (codeEditorStatusText) {
+        if (currentEditorLine > 0) {
+          codeEditorStatusText.textContent = `スクリプト: ${baseName} | エラー該当行: ${currentEditorLine} 行目 | Ctrl+S で保存`;
+        } else {
+          codeEditorStatusText.textContent = `スクリプト: ${baseName} | Ctrl+S で保存`;
+        }
+      }
+    } catch (err) {
+      if (codeEditorTextarea) codeEditorTextarea.value = `# 読み込み失敗: ${err.message}`;
+    }
+  }
+
+  function updateLineNumbers(codeText, errorLine = 0) {
+    if (!codeEditorLinenums) return;
+    const lines = codeText.split("\n");
+    const count = Math.max(1, lines.length);
+    let html = "";
+    for (let i = 1; i <= count; i++) {
+      const isErr = (i === errorLine);
+      html += `<div class="linenum-item ${isErr ? 'error-line' : ''}">${i}</div>`;
+    }
+    codeEditorLinenums.innerHTML = html;
+  }
+
+  function scrollToEditorLine(lineNum) {
+    if (!codeEditorTextarea || lineNum <= 0) {
+      if (codeEditorHighlight) codeEditorHighlight.style.display = "none";
+      return;
+    }
+    const lineHeight = 20;
+    const targetScroll = Math.max(0, (lineNum - 1) * lineHeight - 100);
+    codeEditorTextarea.scrollTop = targetScroll;
+
+    if (codeEditorHighlight) {
+      codeEditorHighlight.style.display = "block";
+      const topPos = 12 + (lineNum - 1) * lineHeight - codeEditorTextarea.scrollTop;
+      codeEditorHighlight.style.top = `${topPos}px`;
+    }
+  }
+
+  function updateHighlightPosition() {
+    if (!codeEditorTextarea || !codeEditorHighlight || currentEditorLine <= 0) return;
+    const lineHeight = 20;
+    const topPos = 12 + (currentEditorLine - 1) * lineHeight - codeEditorTextarea.scrollTop;
+    codeEditorHighlight.style.top = `${topPos}px`;
+  }
+
+  async function saveEditorCode() {
+    if (!currentEditorFile || !codeEditorTextarea) return;
+    if (codeEditorStatusText) codeEditorStatusText.textContent = "保存処理中...";
+    try {
+      const res = await fetch("/api/behavior/code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: currentEditorFile, code: codeEditorTextarea.value })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (codeEditorStatusText) {
+          codeEditorStatusText.textContent = `保存完了 (${new Date().toLocaleTimeString()})`;
+        }
+        appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+      } else {
+        if (codeEditorStatusText) codeEditorStatusText.textContent = `保存失敗: ${data.message}`;
+      }
+    } catch (err) {
+      if (codeEditorStatusText) codeEditorStatusText.textContent = `通信エラー: ${err.message}`;
+    }
+  }
+
+  async function openEditorInVscode() {
+    if (!currentEditorFile) return;
+    try {
+      const res = await fetch("/api/behavior/open_vscode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: currentEditorFile, line: currentEditorLine || 1 })
+      });
+      const data = await res.json();
+      if (data.success) {
+        appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
+      } else {
+        appendTerminalLog(el.behaviorTerminal, `[WARN] ${data.message}`, "error-msg");
+      }
+    } catch (err) {
+      console.error("VSCode起動リクエストエラー:", err);
+    }
+  }
+
+  function closeCodeEditorModal() {
+    if (codeEditorModal) codeEditorModal.style.display = "none";
+  }
+
+  if (btnViewBehaviorCode) {
+    btnViewBehaviorCode.addEventListener("click", () => {
+      openCodeEditorModal(el.selBehaviorScript ? el.selBehaviorScript.value : "", 0);
+    });
+  }
+
+  if (btnCloseCodeEditor) btnCloseCodeEditor.addEventListener("click", closeCodeEditorModal);
+  if (btnCancelCodeEditor) btnCancelCodeEditor.addEventListener("click", closeCodeEditorModal);
+  if (btnEditorSave) btnEditorSave.addEventListener("click", saveEditorCode);
+  if (btnEditorOpenVscode) btnEditorOpenVscode.addEventListener("click", openEditorInVscode);
+
+  if (codeEditorTextarea) {
+    codeEditorTextarea.addEventListener("scroll", () => {
+      if (codeEditorLinenums) {
+        codeEditorLinenums.scrollTop = codeEditorTextarea.scrollTop;
+      }
+      updateHighlightPosition();
+    });
+    codeEditorTextarea.addEventListener("input", () => {
+      updateLineNumbers(codeEditorTextarea.value, currentEditorLine);
+    });
+    codeEditorTextarea.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        saveEditorCode();
+      }
+    });
+  }
+
+  // ターミナル内のスタックトレースリンククリックの委譲処理
+  if (el.behaviorTerminal) {
+    el.behaviorTerminal.addEventListener("click", (e) => {
+      const link = e.target.closest(".traceback-link");
+      if (link) {
+        e.preventDefault();
+        const fName = link.getAttribute("data-file");
+        const lNum = parseInt(link.getAttribute("data-line"), 10) || 0;
+        openCodeEditorModal(fName, lNum);
+      }
+    });
+  }
+
   // プロファイルのロード（グローバル関数化）
   window.loadProfile = async (name) => {
     appendTerminalLog(el.behaviorTerminal, `プロファイル '${name}' をロード中...`);
@@ -1940,6 +2156,14 @@ document.addEventListener("DOMContentLoaded", () => {
         appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
       } else {
         appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
+        // 構文エラーなどの行番号が含まれている場合は自動でエディタを開いて該当行をハイライト
+        const lineMatch = data.message.match(/line\s+(\d+)/);
+        if (lineMatch) {
+          const errLine = parseInt(lineMatch[1], 10) || 0;
+          setTimeout(() => {
+            openCodeEditorModal(script, errLine);
+          }, 200);
+        }
       }
     } catch (err) {
       appendTerminalLog(el.behaviorTerminal, `[ERROR] 通信エラー: ${err}`, "error-msg");
