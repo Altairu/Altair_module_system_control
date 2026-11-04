@@ -206,7 +206,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const text = el.canStatusIndicator.querySelector(".status-text");
 
     if (data.is_connected) {
-      dot.className = "status-dot connected";
+      dot.className = data.error_message ? "status-dot warning" : "status-dot connected";
       text.textContent = `CAN: Connected (${data.active_port})`;
       if (el.btnConnectCan) el.btnConnectCan.disabled = true;
       if (el.btnDisconnectCan) el.btnDisconnectCan.disabled = false;
@@ -215,11 +215,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // slcan接続グループのUI更新
       if (el.slcanConnectionStatus) {
-        el.slcanConnectionStatus.innerHTML = `状態: <span class="badge badge-success" style="padding: 4px 8px; font-size: 11px;">接続完了 (${data.active_port})</span>`;
+        if (data.error_message) {
+          el.slcanConnectionStatus.innerHTML = `状態: <span class="badge badge-warning" style="padding: 4px 8px; font-size: 11px;">${data.error_message}</span>`;
+        } else {
+          el.slcanConnectionStatus.innerHTML = `状態: <span class="badge badge-success" style="padding: 4px 8px; font-size: 11px;">接続完了 (${data.active_port})</span>`;
+        }
       }
       if (el.groupConnectionSlcan) {
-        el.groupConnectionSlcan.style.borderColor = "var(--success-color)";
+        el.groupConnectionSlcan.style.borderColor = data.error_message ? "var(--color-warning)" : "var(--success-color)";
         el.groupConnectionSlcan.style.boxShadow = "0 0 10px rgba(19, 115, 51, 0.1)";
+      }
+      if (data.error_message && data.error_message !== state.lastCanError) {
+        state.lastCanError = data.error_message;
+        appendTerminalLog(el.behaviorTerminal, `[CAN WARNING] ${data.error_message}`, "error-msg");
+      } else if (!data.error_message) {
+        state.lastCanError = "";
       }
     } else {
       dot.className = "status-dot disconnected";
@@ -238,8 +248,11 @@ document.addEventListener("DOMContentLoaded", () => {
         el.groupConnectionSlcan.style.boxShadow = "none";
       }
 
-      if (data.error_message) {
+      if (data.error_message && data.error_message !== state.lastCanError) {
+        state.lastCanError = data.error_message;
         appendTerminalLog(el.behaviorTerminal, `[CAN ERROR] ${data.error_message}`, "error-msg");
+      } else if (!data.error_message) {
+        state.lastCanError = "";
       }
     }
   }
