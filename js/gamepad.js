@@ -137,6 +137,31 @@ document.addEventListener("DOMContentLoaded", () => {
       </tr>`;
   }
 
+  // バックグラウンドスロットリングを回避するWeb Workerタイマー
+  let workerTimer = null;
+  function createWorkerTimer() {
+    try {
+      const blob = new Blob([
+        `let timer = null;
+        self.onmessage = function(e) {
+          if (e.data === 'start') {
+            if (!timer) timer = setInterval(() => self.postMessage('tick'), 25);
+          } else if (e.data === 'stop') {
+            if (timer) { clearInterval(timer); timer = null; }
+          }
+        };`
+      ], { type: 'application/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob));
+      worker.onmessage = () => {
+        pollAndSendGamepad();
+      };
+      return worker;
+    } catch (e) {
+      console.warn("Web Workerタイマーの初期化に失敗しました (setIntervalフォールバック使用):", e);
+      return null;
+    }
+  }
+
   // --- 3. コントローラー状態のサンプリング ＆ 送信タイマー ---
   function startGamepadPolling() {
     stopGamepadPolling();
@@ -148,10 +173,20 @@ document.addEventListener("DOMContentLoaded", () => {
     if (dashDisconnected) dashDisconnected.style.display = "none";
     if (dashConnected) dashConnected.style.display = "flex";
 
-    state.intervalId = setInterval(pollAndSendGamepad, 50); // 20Hz
+    if (!workerTimer) {
+      workerTimer = createWorkerTimer();
+    }
+    if (workerTimer) {
+      workerTimer.postMessage('start');
+    } else {
+      state.intervalId = setInterval(pollAndSendGamepad, 25);
+    }
   }
 
   function stopGamepadPolling() {
+    if (workerTimer) {
+      workerTimer.postMessage('stop');
+    }
     if (state.intervalId) {
       clearInterval(state.intervalId);
       state.intervalId = null;
@@ -176,19 +211,28 @@ document.addEventListener("DOMContentLoaded", () => {
     // ボタンの押し下げ状態の取得
     const buttonsData = gp.buttons.map(b => b.pressed);
 
-    // WebSocket経由で操縦PC(ROS2ノード / Pythonスクリプト)へ送信
-    const mainWs = window.appWs || window.parent.appWs;
-    if (mainWs && mainWs.readyState === WebSocket.OPEN) {
-      mainWs.send(JSON.stringify({
-        type: "gamepad_input",
-        axes: axesData,
-        buttons: buttonsData
-      }));
+    // バックエンド側 (Rust gilrs) が既にネイティブ取得・配信している場合はブラウザ送信を抑制
+    // (Rust側で未検出の場合のみブラウザからフォールバック送信)
+    const backendActive = window.backendGamepadLastReceived && (Date.now() - window.backendGamepadLastReceived < 1000);
+    if (!backendActive) {
+      const mainWs = window.appWs || window.parent.appWs;
+      if (mainWs && mainWs.readyState === WebSocket.OPEN) {
+        mainWs.send(JSON.stringify({
+          type: "gamepad_input",
+          axes: axesData,
+          buttons: buttonsData
+        }));
+      }
     }
 
     // 画面モニターの更新
     updateMonitorUI(axesData, buttonsData);
   }
+
+  // グローバル公開 (Rustバックエンドからの配信値でもモニターUIをリアルタイム更新)
+  window.updateGamepadMonitorFromBackend = (axes, buttons) => {
+    updateMonitorUI(axes || [], buttons || []);
+  };
 
   // リアルタイムインプットモニターの描画更新
   function updateMonitorUI(axes, buttons) {

@@ -240,6 +240,12 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         });
     }
 
+    // ネイティブゲームパッド監視サービスを起動 (50Hz バックグラウンド取得)
+    {
+        let gp_service = crate::gamepad_service::GamepadService::new();
+        gp_service.start(ws_tx.clone());
+    }
+
     let state = AppState {
         profiles_dir,
         network_config_path,

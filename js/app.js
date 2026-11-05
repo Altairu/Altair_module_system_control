@@ -198,6 +198,13 @@ document.addEventListener("DOMContentLoaded", () => {
         updateMddCardFeedback(msg.name, data);
         break;
 
+      case "gamepad_input":
+        window.backendGamepadLastReceived = Date.now();
+        if (typeof window.updateGamepadMonitorFromBackend === "function") {
+          window.updateGamepadMonitorFromBackend(msg.axes, msg.buttons);
+        }
+        break;
+
       case "raw_can_frame": // システム全体のCANログ用
         appendCanLog(data);
         break;

@@ -2,6 +2,7 @@
 
 mod behavior_runner;
 mod eth_can_bridge;
+mod gamepad_service;
 mod module_manager;
 mod server;
 mod types;
