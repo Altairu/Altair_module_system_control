@@ -139,6 +139,11 @@ document.addEventListener("DOMContentLoaded", () => {
         renderCanSummaryTable();
         rebuildCanStreamTerminals();
       }
+
+      // テレメトリ画面を開いた際にモジュール選択肢を更新
+      if (targetId === "view-telemetry") {
+        updateScopeModuleSelect();
+      }
     });
   });
 
@@ -823,6 +828,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       renderModuleCards();
       updateCanFilterSelectOptions();
+      updateScopeModuleSelect();
     } catch (err) {
       console.error("モジュール設定のロードに失敗しました:", err);
     }
@@ -3556,25 +3562,34 @@ if __name__ == '__main__':
   function updateScopeModuleSelect() {
     if (!selScopeModule) return;
     const currentVal = selScopeModule.value;
-    selScopeModule.innerHTML = "";
+
+    // 設定ファイルに登録済みの MDD モジュールを取り込む
+    if (state.config && state.config.modules) {
+      state.config.modules
+        .filter(m => m.type === "mdd")
+        .forEach(m => scopeState.knownModules.add(m.name));
+    }
 
     const mods = Array.from(scopeState.knownModules);
     if (mods.length === 0) {
-      selScopeModule.innerHTML = '<option value="">モジュールなし</option>';
+      selScopeModule.innerHTML = '<option value="">MDD未設定</option>';
       return;
     }
 
+    selScopeModule.innerHTML = "";
     mods.forEach(name => {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
-      if (name === scopeState.selectedModule) opt.selected = true;
+      if (name === scopeState.selectedModule || (!scopeState.selectedModule && name === currentVal)) {
+        opt.selected = true;
+      }
       selScopeModule.appendChild(opt);
     });
 
     if (!scopeState.selectedModule && mods.length > 0) {
-      scopeState.selectedModule = mods[0];
-      selScopeModule.value = mods[0];
+      scopeState.selectedModule = currentVal && mods.includes(currentVal) ? currentVal : mods[0];
+      selScopeModule.value = scopeState.selectedModule;
     }
   }
 
@@ -3972,7 +3987,7 @@ if __name__ == '__main__':
         const a = isAngle ? p.angle : p.speed;
         const e = isAngle ? p.errorAngle : p.errorSpeed;
         const sw = p.limitSw || [false, false, false, false];
-        csv += `${p.time.toFixed(4)},${t.toFixed(2)},${a.toFixed(2)},${e.toFixed(2)},${sw[0]?1:0},${sw[1]?1:0},${sw[2]?1:0},${sw[3]?1:0}\n`;
+        csv += `${p.time.toFixed(4)},${t.toFixed(2)},${a.toFixed(2)},${e.toFixed(2)},${sw[0] ? 1 : 0},${sw[1] ? 1 : 0},${sw[2] ? 1 : 0},${sw[3] ? 1 : 0}\n`;
       }
 
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -3986,6 +4001,9 @@ if __name__ == '__main__':
       URL.revokeObjectURL(url);
     });
   }
+
+  // 初期選択肢の構築
+  updateScopeModuleSelect();
 
   // 描画ループ起動
   requestAnimationFrame(renderScopeCanvas);
