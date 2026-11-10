@@ -232,14 +232,19 @@ class MddClient:
 
     def set_targets(self, targets):
         float_targets = [float(t) for t in targets]
+        now = time.monotonic()
 
-        # 同一目標値の完全重複送信のみを間引き、値の変化時はスリープなしで即時送信
-        if self._last_targets == float_targets:
-            now = time.monotonic()
-            if now - self._last_send_time < 0.02:
+        # ソケットおよびCANキューのオーバーフローを防ぎつつ、ゲームパッド操作に超低遅延で追従
+        if self._last_targets is not None:
+            max_diff = max(abs(a - b) for a, b in zip(self._last_targets, float_targets))
+            # 変化が微小(0.01未満)かつ前回の送信から20ms未満の場合はスキップ
+            if max_diff < 0.01 and (now - self._last_send_time < 0.02):
+                return
+            # 操作中(目標値追従中)でも、最大200Hz (5ms) 間隔に制限してキューイング遅延を防止
+            if now - self._last_send_time < 0.005:
                 return
 
-        self._last_send_time = time.monotonic()
+        self._last_send_time = now
         self._last_targets = float_targets
 
         self.behavior._ws.send_json(

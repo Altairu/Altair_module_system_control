@@ -112,6 +112,7 @@ pub struct AppState {
     pub module_manager: ModuleManager,
     pub behavior_runner: BehaviorRunner,
     pub ws_tx: broadcast::Sender<WsEvent>,
+    pub can_log_tx: broadcast::Sender<WsEvent>,
 }
 
 /// 実行ファイルまたはカレントディレクトリからプロジェクトルートを自動検出
@@ -153,6 +154,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
     };
 
     let (ws_tx, _) = broadcast::channel::<WsEvent>(2048);
+    let (can_log_tx, _) = broadcast::channel::<WsEvent>(2048);
     let (rx_tx, _) = broadcast::channel::<CanFrameEvent>(2048);
 
     let active_mode = Arc::new(Mutex::new("eth".to_string()));
@@ -191,7 +193,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
     {
         let mut rx_sub = rx_tx.subscribe();
         let mm = module_manager.clone();
-        let ws_tx_clone = ws_tx.clone();
+        let can_log_tx_clone = can_log_tx.clone();
         tokio::spawn(async move {
             while let Ok(frame) = rx_sub.recv().await {
                 if frame.direction == "RX" {
@@ -212,7 +214,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
                     frame.dlc,
                     data_hex.join(" ")
                 );
-                let _ = ws_tx_clone.send(WsEvent::RawCanFrame { data: log_line });
+                let _ = can_log_tx_clone.send(WsEvent::RawCanFrame { data: log_line });
             }
         });
     }
@@ -270,6 +272,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         module_manager,
         behavior_runner,
         ws_tx,
+        can_log_tx,
     };
 
     let app = Router::new()
@@ -1058,14 +1061,18 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
         let is_behavior = filter == "behavior";
         let mut last_mdd_feedback_sent = tokio::time::Instant::now();
 
-        while let Ok(ev) = rx.recv().await {
-            // Python Behavior クライアントへは大量の raw_can_frame ログを送信せず帯域・CPUを節約
-            if is_behavior {
+        if is_behavior {
+            // Python Behavior クライアント: 生CANログは購読せず、制御/ゲームパッド/フィードバックのみを超低遅延で配信
+            loop {
+                let ev = match rx.recv().await {
+                    Ok(ev) => ev,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
                 match &ev {
                     WsEvent::RawCanFrame { .. } => continue,
                     WsEvent::MddFeedback { .. } => {
-                        // Python Behavior への MddFeedback 送信を最大 20Hz (50ms) にスロットリングし、
-                        // Python側の JSON パース負荷とソケット滞留によるゲームパッド遅延を防止
+                        // Python Behavior への MddFeedback 送信を最大 20Hz (50ms) にスロットリング
                         if last_mdd_feedback_sent.elapsed() < Duration::from_millis(50) {
                             continue;
                         }
@@ -1073,10 +1080,41 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
                     }
                     _ => {}
                 }
+                if let Ok(txt) = serde_json::to_string(&ev) {
+                    if sender.send(Message::Text(txt)).await.is_err() {
+                        break;
+                    }
+                }
             }
-            if let Ok(txt) = serde_json::to_string(&ev) {
-                if sender.send(Message::Text(txt)).await.is_err() {
-                    break;
+        } else {
+            // WebUI クライアント: 制御イベントと生CANログの両方を配信
+            let mut can_rx = state.can_log_tx.subscribe();
+            loop {
+                tokio::select! {
+                    res = rx.recv() => {
+                        let ev = match res {
+                            Ok(ev) => ev,
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        };
+                        if let Ok(txt) = serde_json::to_string(&ev) {
+                            if sender.send(Message::Text(txt)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    res = can_rx.recv() => {
+                        let ev = match res {
+                            Ok(ev) => ev,
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        };
+                        if let Ok(txt) = serde_json::to_string(&ev) {
+                            if sender.send(Message::Text(txt)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }

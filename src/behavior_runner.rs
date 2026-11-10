@@ -194,7 +194,7 @@ impl BehaviorRunner {
             .env("ALTAIR_CONFIG_PATH", &self.config_path)
             .env(
                 "ALTAIR_WS_URL",
-                format!("ws://127.0.0.1:{}/ws", self.server_port),
+                format!("ws://127.0.0.1:{}/ws?filter=behavior", self.server_port),
             )
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
