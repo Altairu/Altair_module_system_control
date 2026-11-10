@@ -3305,9 +3305,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (until) {
       argument0 = 'not ' + argument0;
     }
-    // ループ内に明示的なスリープがない場合でも、ビジーループによるGILロックとCPU高負荷を防ぐため 10ms (100Hz) スリープを自動挿入
+    // 高速応答 (2ms / 500Hz) でゲームパッド入力とモータ出力を追従させ、GILロックを防ぐスリープ
     const indent = gen.INDENT || '    ';
-    return `while ${argument0}:\n${branch}${indent}time.sleep(0.01)\n`;
+    return `while ${argument0}:\n${branch}${indent}time.sleep(0.002)\n`;
   });
 
   registerGenerator('controls_repeat_ext', function (block, generator) {
@@ -3315,7 +3315,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const repeats = gen.valueToCode(block, 'TIMES', getAtomicOrder()) || '0';
     let branch = gen.statementToCode(block, 'DO');
     const indent = gen.INDENT || '    ';
-    return `for _count in range(int(${repeats})):\n${branch}${indent}time.sleep(0.01)\n`;
+    return `for _count in range(int(${repeats})):\n${branch}${indent}time.sleep(0.002)\n`;
   });
 
   registerGenerator('robot_kinematics', function (block, generator) {
@@ -3343,23 +3343,29 @@ document.addEventListener("DOMContentLoaded", () => {
     const omega = gen.valueToCode(block, 'OMEGA', order) || '0.0';
 
     return `
-# ロボット運動学計算と目標速度送信
+# ロボット運動学計算と目標速度送信 (キャッシュにより超低遅延で実行)
+if not hasattr(self, '_kinematics_cache_${mddName}'):
+    def _calc_k(slot):
+        if slot == 'none': return 1000.0 / (3.141592653589793 * 100.0)
+        dia = 100.0
+        for _m in self.config.get('modules', []):
+            if _m.get('name') == "${mddName}":
+                dia = _m.get('parameters', {}).get(slot, {}).get('diameter', 100.0)
+                break
+        return 1000.0 / (3.141592653589793 * dia)
+    self._kinematics_cache_${mddName} = (
+        _calc_k("${mLf}"),
+        _calc_k("${mRf}"),
+        _calc_k("${mLr}"),
+        _calc_k("${mRr}"),
+        self.get_module("${mddName}")
+    )
+_k_lf, _k_rf, _k_lr, _k_rr, _mdd_mod = self._kinematics_cache_${mddName}
+
 _vx_val = float(${vx}) / 1000.0
 _vy_val = float(${vy}) / 1000.0
 _omega_val = float(${omega})
 _r_t = ${tread} / 2000.0
-
-def _get_dia(m_slot):
-    if m_slot == 'none': return 100.0
-    for _m in self.config.get('modules', []):
-        if _m.get('name') == "${mddName}":
-            return _m.get('parameters', {}).get(m_slot, {}).get('diameter', 100.0)
-    return 100.0
-
-_k_lf = 1000.0 / (3.141592653589793 * _get_dia("${mLf}"))
-_k_rf = 1000.0 / (3.141592653589793 * _get_dia("${mRf}"))
-_k_lr = 1000.0 / (3.141592653589793 * _get_dia("${mLr}"))
-_k_rr = 1000.0 / (3.141592653589793 * _get_dia("${mRr}"))
 
 _target_speeds = [0.0, 0.0, 0.0, 0.0]
 if "${type}" == "3_OMNI":
@@ -3395,7 +3401,7 @@ elif "${type}" == "2_DIFF":
         if _slot != 'none':
             _target_speeds[int(_slot[1]) - 1] = _val
 
-self.get_module("${mddName}").set_targets(_target_speeds)
+_mdd_mod.set_targets(_target_speeds)
 `;
   });
 

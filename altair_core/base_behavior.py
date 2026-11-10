@@ -231,20 +231,15 @@ class MddClient:
         self._last_targets = None
 
     def set_targets(self, targets):
-        now = time.monotonic()
         float_targets = [float(t) for t in targets]
 
-        # 入力値に変化がない場合、直近50ms以内の同一送信を間引いてTCPキュー滞留を防止
-        if self._last_targets == float_targets and (now - self._last_send_time < 0.05):
-            return
-
-        # 100Hz (10ms) 以上の過剰なバースト送信を抑制
-        elapsed = now - self._last_send_time
-        if elapsed < 0.008:
-            time.sleep(0.008 - elapsed)
+        # 同一目標値の完全重複送信のみを間引き、値の変化時はスリープなしで即時送信
+        if self._last_targets == float_targets:
             now = time.monotonic()
+            if now - self._last_send_time < 0.02:
+                return
 
-        self._last_send_time = now
+        self._last_send_time = time.monotonic()
         self._last_targets = float_targets
 
         self.behavior._ws.send_json(

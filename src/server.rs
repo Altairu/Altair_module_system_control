@@ -1020,11 +1020,21 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
 
     let send_task = tokio::spawn(async move {
         let is_behavior = filter == "behavior";
+        let mut last_mdd_feedback_sent = tokio::time::Instant::now();
+
         while let Ok(ev) = rx.recv().await {
             // Python Behavior クライアントへは大量の raw_can_frame ログを送信せず帯域・CPUを節約
             if is_behavior {
                 match &ev {
                     WsEvent::RawCanFrame { .. } => continue,
+                    WsEvent::MddFeedback { .. } => {
+                        // Python Behavior への MddFeedback 送信を最大 20Hz (50ms) にスロットリングし、
+                        // Python側の JSON パース負荷とソケット滞留によるゲームパッド遅延を防止
+                        if last_mdd_feedback_sent.elapsed() < Duration::from_millis(50) {
+                            continue;
+                        }
+                        last_mdd_feedback_sent = tokio::time::Instant::now();
+                    }
                     _ => {}
                 }
             }
