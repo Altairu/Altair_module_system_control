@@ -2786,10 +2786,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       if (data.current_version) {
         const vText = `v${data.current_version}`;
-        if (lblAppVersion) lblAppVersion.textContent = vText;
-        if (lblSidebarVersion) lblSidebarVersion.textContent = vText;
-        if (lblAboutVer) lblAboutVer.textContent = vText;
-        if (lblModalCurVer) lblModalCurVer.textContent = vText;
+        if (lblAppVersion && lblAppVersion.textContent !== vText) lblAppVersion.textContent = vText;
+        if (lblSidebarVersion && lblSidebarVersion.textContent !== vText) lblSidebarVersion.textContent = vText;
+        if (lblAboutVer && lblAboutVer.textContent !== vText) lblAboutVer.textContent = vText;
+        if (lblModalCurVer && lblModalCurVer.textContent !== vText) lblModalCurVer.textContent = vText;
       }
       if (lblModalLatestVer && data.latest_version) {
         lblModalLatestVer.textContent = `v${data.latest_version}`;

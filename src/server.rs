@@ -57,7 +57,9 @@ async fn serve_index_html() -> impl IntoResponse {
         APP_JS.hash(&mut hasher);
         GAMEPAD_JS.hash(&mut hasher);
         let v = format!("{:x}", hasher.finish());
+        let cur_ver = format!("v{}", env!("CARGO_PKG_VERSION"));
         INDEX_HTML
+            .replace("__APP_VERSION__", &cur_ver)
             .replace("/css/styles.css\"", &format!("/css/styles.css?v={}\"", v))
             .replace("/js/app.js\"", &format!("/js/app.js?v={}\"", v))
             .replace("/js/gamepad.js\"", &format!("/js/gamepad.js?v={}\"", v))
