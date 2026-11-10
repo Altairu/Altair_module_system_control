@@ -173,6 +173,21 @@
                 <button class="btn btn-secondary" id="btn-disconnect-can" disabled>Disconnect</button>
               </div>
             </div>
+
+            <!-- 通信周期 (Rate) 設定 -->
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between;">
+              <label for="sel-can-rate" style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-wave-square"></i> 通信周期 (Rate):
+              </label>
+              <select id="sel-can-rate" class="form-input" style="width: 135px; font-size: 12px; padding: 4px 8px;">
+                <option value="100">100 Hz (10ms)</option>
+                <option value="500">500 Hz (2ms)</option>
+                <option value="1000">1000 Hz (1ms)</option>
+              </select>
+            </div>
+            <div id="hint-can-rate-usb" style="display: none; font-size: 11px; color: #eab308; margin-top: 4px;">
+              <i class="fa-solid fa-triangle-exclamation"></i> USB (slcan) は帯域の都合上 100Hz 推奨です
+            </div>
           </div>
 
           <!-- 動作モードパラメータ送信 -->

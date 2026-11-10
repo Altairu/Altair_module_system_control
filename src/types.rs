@@ -54,11 +54,26 @@ pub struct ModuleConfig {
     pub parameters: Option<HashMap<String, MotorParam>>,
 }
 
+fn default_control_rate_hz() -> u32 {
+    100
+}
+
 /// 全体モジュール構成ファイル (modules_config.json / profiles/*.json)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModulesConfigFile {
+    #[serde(default = "default_control_rate_hz")]
+    pub control_rate_hz: u32,
     #[serde(default)]
     pub modules: Vec<ModuleConfig>,
+}
+
+impl Default for ModulesConfigFile {
+    fn default() -> Self {
+        Self {
+            control_rate_hz: 100,
+            modules: Vec::new(),
+        }
+    }
 }
 
 /// Ethernet-CAN ネットワーク設定 (network_config.json)

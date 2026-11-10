@@ -45,6 +45,8 @@ document.addEventListener("DOMContentLoaded", () => {
     btnConnectCan: document.getElementById("btn-connect-can"),
     btnDisconnectCan: document.getElementById("btn-disconnect-can"),
     btnEmergencyStop: document.getElementById("btn-emergency-stop"),
+    selCanRate: document.getElementById("sel-can-rate"),
+    hintCanRateUsb: document.getElementById("hint-can-rate-usb"),
 
     // パラメータ・モジュール管理
     btnSendParams: document.getElementById("btn-send-params"),
@@ -836,6 +838,11 @@ document.addEventListener("DOMContentLoaded", () => {
       renderModuleCards();
       updateCanFilterSelectOptions();
       updateScopeModuleSelect();
+
+      if (state.config && state.config.control_rate_hz && el.selCanRate) {
+        el.selCanRate.value = String(state.config.control_rate_hz);
+      }
+      updateRateUsbHint();
     } catch (err) {
       console.error("モジュール設定のロードに失敗しました:", err);
     }
@@ -1529,6 +1536,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   el.btnRefreshPorts.addEventListener("click", refreshPorts);
 
+  function updateRateUsbHint() {
+    if (!el.hintCanRateUsb || !el.selCanRate) return;
+    const isUsb = el.panelConnUsb && el.panelConnUsb.style.display !== "none";
+    const rate = parseInt(el.selCanRate.value, 10) || 100;
+    if (isUsb && rate > 100) {
+      el.hintCanRateUsb.style.display = "block";
+    } else {
+      el.hintCanRateUsb.style.display = "none";
+    }
+  }
+
   // Ethernet / USB 接続モードタブ切り替え
   if (el.tabModeEth && el.tabModeUsb) {
     el.tabModeEth.addEventListener("click", () => {
@@ -1536,6 +1554,7 @@ document.addEventListener("DOMContentLoaded", () => {
       el.tabModeUsb.className = "btn btn-sm btn-secondary";
       el.panelConnEth.style.display = "block";
       el.panelConnUsb.style.display = "none";
+      updateRateUsbHint();
     });
 
     el.tabModeUsb.addEventListener("click", () => {
@@ -1543,6 +1562,19 @@ document.addEventListener("DOMContentLoaded", () => {
       el.tabModeEth.className = "btn btn-sm btn-secondary";
       el.panelConnUsb.style.display = "block";
       el.panelConnEth.style.display = "none";
+      updateRateUsbHint();
+    });
+  }
+
+  // CAN 通信周期変更イベント
+  if (el.selCanRate) {
+    el.selCanRate.addEventListener("change", async () => {
+      const rate = parseInt(el.selCanRate.value, 10) || 100;
+      if (!state.config) state.config = { modules: [] };
+      state.config.control_rate_hz = rate;
+      updateRateUsbHint();
+      await saveConfigToServer();
+      appendTerminalLog(el.behaviorTerminal, `[SYSTEM] CAN通信周期を ${rate}Hz に変更しました`, "system-msg");
     });
   }
 

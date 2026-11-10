@@ -469,7 +469,7 @@ impl EthCanBridge {
                     }
 
                     // 2. 送信 / ポーリング処理 (20バイト固定長パケット)
-                    // STM32の interrupt() タイマー (1ms) に配慮し、送信間隔と設定フレーム後の保持時間を厳密に管理する
+                    // STM32の interrupt() タイマー (1ms) に配慮し、送信間隔と設定フレーム後の保持時間を管理する
                     if disconnected_err.is_none() {
                         let now = Instant::now();
                         let since_last_send_ms =
@@ -477,60 +477,74 @@ impl EthCanBridge {
                         let since_config_tx_ms =
                             now.duration_since(last_config_tx_time).as_secs_f64() * 1000.0;
 
-                        if since_last_send_ms >= 2.5 {
-                            let next_item = {
-                                let mut g = inner.lock().unwrap();
-                                match g.tx_queue.front() {
-                                    Some(front) => {
-                                        // 直前に送信した設定フレームと異なるIDへ切り替わる際は、
-                                        // STM32側の eth_recv_data が1ms割り込みで確実にCAN送信されるよう最低8ms保持する
-                                        let need_config_hold = match last_sent_config_id {
-                                            Some(prev_id) => front.can_id != prev_id,
-                                            None => false,
-                                        };
-                                        if need_config_hold && since_config_tx_ms < 8.0 {
-                                            None
+                        let next_item = {
+                            let mut g = inner.lock().unwrap();
+                            match g.tx_queue.front() {
+                                Some(front) => {
+                                    // 直前に送信した設定フレームと異なるIDへ切り替わる際は、
+                                    // STM32側の eth_recv_data が1ms割り込みで確実にCAN送信されるよう最低8ms保持する
+                                    let need_config_hold = match last_sent_config_id {
+                                        Some(prev_id) => front.can_id != prev_id,
+                                        None => false,
+                                    };
+                                    if need_config_hold && since_config_tx_ms < 8.0 {
+                                        None
+                                    } else {
+                                        // 設定フレーム送信または直前が設定フレームの場合は2.5ms、通常制御フレームは0.5ms（1000Hz対応）の間隔
+                                        let min_interval = if front.is_config_frame
+                                            || last_sent_config_id.is_some()
+                                        {
+                                            2.5
                                         } else {
+                                            0.5
+                                        };
+                                        if since_last_send_ms >= min_interval {
                                             g.tx_queue.pop_front()
+                                        } else {
+                                            None
                                         }
                                     }
-                                    None => None,
                                 }
-                            };
-
-                            let mut tx_payload = [0u8; ANALYZER_TX_SIZE];
-                            let mut is_config_tx = false;
-                            let mut sent_can_id: Option<u16> = None;
-                            let mut should_send_wire = false;
-                            let mut event_to_send: Option<CanFrameEvent> = None;
-
-                            if let Some(item) = next_item {
-                                tx_payload.copy_from_slice(&item.payload);
-                                is_config_tx = item.is_config_frame;
-                                sent_can_id = Some(item.can_id);
-                                should_send_wire = true;
-                                event_to_send = Some(CanFrameEvent {
-                                    direction: "TX".to_string(),
-                                    channel: if item.send_to_can2 {
-                                        "can2".to_string()
-                                    } else {
-                                        "can1".to_string()
-                                    },
-                                    id: item.can_id,
-                                    dlc: item.dlc,
-                                    data: item.raw_data,
-                                });
-                            } else {
-                                let queue_empty = inner.lock().unwrap().tx_queue.is_empty();
-                                // 設定フレーム送信直後はSTM32の eth_recv_data をゼロで上書きしないよう15msの間 poll を抑制し、
-                                // 通常時は 5.0ms 周期で 20B ゼロパケットを送信して 5ms 周期の CAN RX を継続させる
-                                if queue_empty && since_last_send_ms >= 5.0 && since_config_tx_ms >= 15.0 {
-                                    tx_payload = [0u8; ANALYZER_TX_SIZE];
-                                    should_send_wire = true;
-                                }
+                                None => None,
                             }
+                        };
 
-                            if should_send_wire {
+                        let mut tx_payload = [0u8; ANALYZER_TX_SIZE];
+                        let mut is_config_tx = false;
+                        let mut sent_can_id: Option<u16> = None;
+                        let mut should_send_wire = false;
+                        let mut event_to_send: Option<CanFrameEvent> = None;
+
+                        if let Some(item) = next_item {
+                            tx_payload.copy_from_slice(&item.payload);
+                            is_config_tx = item.is_config_frame;
+                            sent_can_id = Some(item.can_id);
+                            should_send_wire = true;
+                            event_to_send = Some(CanFrameEvent {
+                                direction: "TX".to_string(),
+                                channel: if item.send_to_can2 {
+                                    "can2".to_string()
+                                } else {
+                                    "can1".to_string()
+                                },
+                                id: item.can_id,
+                                dlc: item.dlc,
+                                data: item.raw_data,
+                            });
+                        } else {
+                            let queue_empty = inner.lock().unwrap().tx_queue.is_empty();
+                            // 設定フレーム送信直後はSTM32の eth_recv_data をゼロで上書きしないよう15msの間 poll を抑制し、
+                            // 通常時は 5.0ms 周期で 20B ゼロパケットを送信して 5ms 周期の CAN RX を継続させる
+                            if queue_empty
+                                && since_last_send_ms >= 5.0
+                                && since_config_tx_ms >= 15.0
+                            {
+                                tx_payload = [0u8; ANALYZER_TX_SIZE];
+                                should_send_wire = true;
+                            }
+                        }
+
+                        if should_send_wire {
                                 match sock.write_all(&tx_payload) {
                                     Ok(()) => {
                                         let _ = sock.flush();
@@ -559,7 +573,6 @@ impl EthCanBridge {
                             }
                         }
                     }
-                }
 
                 if let Some(err) = disconnected_err {
                     stream_opt = None;

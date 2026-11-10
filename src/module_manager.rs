@@ -672,64 +672,84 @@ impl ModuleManager {
             }
 
             loop {
-                std::thread::sleep(Duration::from_millis(10));
+                let loop_start = Instant::now();
 
-            let frames_to_send = {
-                let g = inner.lock().unwrap();
-                if g.is_sending_params {
-                    continue;
+                let (frames_to_send, rate_hz) = {
+                    let g = inner.lock().unwrap();
+                    let hz = if g.config.control_rate_hz > 0 {
+                        g.config.control_rate_hz
+                    } else {
+                        100
+                    };
+
+                    if g.is_sending_params {
+                        (Vec::new(), hz)
+                    } else {
+                        let mut frames: Vec<(u16, Vec<u8>)> = Vec::new();
+                        for m in &g.config.modules {
+                            let Some(base_id) = parse_hex_id(&m.base_id) else {
+                                continue;
+                            };
+                            match m.module_type.as_str() {
+                                "mdd" => {
+                                    if !g.is_running {
+                                        continue;
+                                    }
+                                    let targets =
+                                        g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
+                                    let mut payload = Vec::with_capacity(8);
+                                    for t in targets {
+                                        let scaled = (t * 10.0).trunc();
+                                        payload.extend_from_slice(&encode_int16_le(scaled));
+                                    }
+                                    frames.push((base_id + 0x20, payload));
+                                }
+                                "servo" => {
+                                    let angles =
+                                        g.servo_angles.get(&m.name).copied().unwrap_or([90; 6]);
+                                    frames.push((base_id, angles.to_vec()));
+                                }
+                                "solenoid" => {
+                                    let valves = g
+                                        .solenoid_valves
+                                        .get(&m.name)
+                                        .copied()
+                                        .unwrap_or([false; 12]);
+                                    let mut byte0 = 0u8;
+                                    let mut byte1 = 0u8;
+                                    for i in 0..12 {
+                                        if valves[i] {
+                                            if i < 8 {
+                                                byte0 |= 1 << i;
+                                            } else {
+                                                byte1 |= 1 << (i - 8);
+                                            }
+                                        }
+                                    }
+                                    frames.push((base_id, vec![byte0, byte1]));
+                                }
+                                _ => {}
+                            }
+                        }
+                        (frames, hz)
+                    }
+                };
+
+                for (id, payload) in frames_to_send {
+                    (send_can_fn)(id, &payload, "can1");
                 }
 
-                let mut frames: Vec<(u16, Vec<u8>)> = Vec::new();
-                for m in &g.config.modules {
-                    let Some(base_id) = parse_hex_id(&m.base_id) else {
-                        continue;
-                    };
-                    match m.module_type.as_str() {
-                        "mdd" => {
-                            if !g.is_running {
-                                continue;
-                            }
-                            let targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
-                            let mut payload = Vec::with_capacity(8);
-                            for t in targets {
-                                let scaled = (t * 10.0).trunc();
-                                payload.extend_from_slice(&encode_int16_le(scaled));
-                            }
-                            frames.push((base_id + 0x20, payload));
-                        }
-                        "servo" => {
-                            let angles = g.servo_angles.get(&m.name).copied().unwrap_or([90; 6]);
-                            frames.push((base_id, angles.to_vec()));
-                        }
-                        "solenoid" => {
-                            let valves = g
-                                .solenoid_valves
-                                .get(&m.name)
-                                .copied()
-                                .unwrap_or([false; 12]);
-                            let mut byte0 = 0u8;
-                            let mut byte1 = 0u8;
-                            for i in 0..12 {
-                                if valves[i] {
-                                    if i < 8 {
-                                        byte0 |= 1 << i;
-                                    } else {
-                                        byte1 |= 1 << (i - 8);
-                                    }
-                                }
-                            }
-                            frames.push((base_id, vec![byte0, byte1]));
-                        }
-                        _ => {}
+                let target_period =
+                    Duration::from_micros((1_000_000.0 / rate_hz as f64).round() as u64);
+                let elapsed = loop_start.elapsed();
+                if elapsed < target_period {
+                    let sleep_dur = target_period - elapsed;
+                    if sleep_dur >= Duration::from_millis(1) {
+                        std::thread::sleep(sleep_dur);
+                    } else {
+                        std::thread::yield_now();
                     }
                 }
-                frames
-            };
-
-            for (id, payload) in frames_to_send {
-                (send_can_fn)(id, &payload, "can1");
-            }
             }
         });
     }
