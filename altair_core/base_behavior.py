@@ -234,15 +234,11 @@ class MddClient:
         float_targets = [float(t) for t in targets]
         now = time.monotonic()
 
-        # ソケットおよびCANキューのオーバーフローを防ぎつつ、ゲームパッド操作に超低遅延で追従
-        if self._last_targets is not None:
-            max_diff = max(abs(a - b) for a, b in zip(self._last_targets, float_targets))
-            # 変化が微小(0.01未満)かつ前回の送信から20ms未満の場合はスキップ
-            if max_diff < 0.01 and (now - self._last_send_time < 0.02):
-                return
-            # 操作中(目標値追従中)でも、最大200Hz (5ms) 間隔に制限してキューイング遅延を防止
-            if now - self._last_send_time < 0.005:
-                return
+        # ループ周期を最大200Hz (5ms) に安定制御し、メインスレッドのGIL独占とビジーループを完全に排除
+        elapsed = now - self._last_send_time
+        if elapsed < 0.005:
+            time.sleep(0.005 - elapsed)
+            now = time.monotonic()
 
         self._last_send_time = now
         self._last_targets = float_targets
@@ -271,8 +267,9 @@ class ServoClient:
 
     def set_angles(self, angles):
         now = time.monotonic()
-        if now - self._last_send_time < 0.002:
-            time.sleep(0.002)
+        elapsed = now - self._last_send_time
+        if elapsed < 0.005:
+            time.sleep(0.005 - elapsed)
             now = time.monotonic()
         self._last_send_time = now
 
@@ -298,8 +295,9 @@ class SolenoidClient:
 
     def set_valves(self, valves):
         now = time.monotonic()
-        if now - self._last_send_time < 0.002:
-            time.sleep(0.002)
+        elapsed = now - self._last_send_time
+        if elapsed < 0.005:
+            time.sleep(0.005 - elapsed)
             now = time.monotonic()
         self._last_send_time = now
 

@@ -30,6 +30,7 @@ class BlocklyBehavior(AltairBehavior):
                     self.get_module("MDD1").set_targets([1, 0, 0, 0])
                 else:
                     self.get_module("MDD1").set_targets([0, 0, 0, 0])
+                time.sleep(0.005)
 
             print("--- Blocklyマクロの実行が完了しました ---")
         except Exception as e:

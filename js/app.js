@@ -3181,10 +3181,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ジェネレーター登録ヘルパー（最新・旧バージョン両対応）
   const registerGenerator = function (blockName, generatorFunc) {
-    if (!pyGen) return;
-    if (pyGen.forBlock) {
-      pyGen.forBlock[blockName] = generatorFunc;
-    } else {
+    if (typeof python !== 'undefined' && python.pythonGenerator) {
+      if (python.pythonGenerator.forBlock) {
+        python.pythonGenerator.forBlock[blockName] = generatorFunc;
+      }
+      python.pythonGenerator[blockName] = generatorFunc;
+    }
+    if (typeof Blockly !== 'undefined' && Blockly.Python) {
+      if (Blockly.Python.forBlock) {
+        Blockly.Python.forBlock[blockName] = generatorFunc;
+      }
+      Blockly.Python[blockName] = generatorFunc;
+    }
+    if (pyGen) {
+      if (pyGen.forBlock) {
+        pyGen.forBlock[blockName] = generatorFunc;
+      }
       pyGen[blockName] = generatorFunc;
     }
   };
@@ -3309,24 +3321,33 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   registerGenerator('controls_whileUntil', function (block, generator) {
-    const gen = generator || pyGen;
+    const gen = generator || pyGen || (typeof Blockly !== 'undefined' ? Blockly.Python : null);
     const until = block.getFieldValue('MODE') === 'UNTIL';
-    let argument0 = gen.valueToCode(block, 'BOOL', getAtomicOrder()) || 'False';
-    let branch = gen.statementToCode(block, 'DO');
+    let argument0 = (gen && gen.valueToCode) ? gen.valueToCode(block, 'BOOL', getAtomicOrder()) : '';
+    if (!argument0) argument0 = 'False';
+    let branch = (gen && gen.statementToCode) ? gen.statementToCode(block, 'DO') : '';
     if (until) {
       argument0 = 'not ' + argument0;
     }
-    // 高速応答 (2ms / 500Hz) でゲームパッド入力とモータ出力を追従させ、GILロックを防ぐスリープ
-    const indent = gen.INDENT || '    ';
-    return `while ${argument0}:\n${branch}${indent}time.sleep(0.002)\n`;
+    const indent = (gen && gen.INDENT) ? gen.INDENT : '    ';
+    let body = branch;
+    if (!body || body.trim() === '') {
+      body = `${indent}pass\n`;
+    }
+    // 200Hz (5ms) 周期でゲームパッド入力とモータ出力を追従させ、GILロックを防ぐスリープ
+    return `while ${argument0}:\n${body}${indent}time.sleep(0.005)\n`;
   });
 
   registerGenerator('controls_repeat_ext', function (block, generator) {
-    const gen = generator || pyGen;
-    const repeats = gen.valueToCode(block, 'TIMES', getAtomicOrder()) || '0';
-    let branch = gen.statementToCode(block, 'DO');
-    const indent = gen.INDENT || '    ';
-    return `for _count in range(int(${repeats})):\n${branch}${indent}time.sleep(0.002)\n`;
+    const gen = generator || pyGen || (typeof Blockly !== 'undefined' ? Blockly.Python : null);
+    const repeats = (gen && gen.valueToCode) ? gen.valueToCode(block, 'TIMES', getAtomicOrder()) : '0';
+    let branch = (gen && gen.statementToCode) ? gen.statementToCode(block, 'DO') : '';
+    const indent = (gen && gen.INDENT) ? gen.INDENT : '    ';
+    let body = branch;
+    if (!body || body.trim() === '') {
+      body = `${indent}pass\n`;
+    }
+    return `for _count in range(int(${repeats || '0'})):\n${body}${indent}time.sleep(0.005)\n`;
   });
 
   registerGenerator('robot_kinematics', function (block, generator) {
