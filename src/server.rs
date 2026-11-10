@@ -878,14 +878,32 @@ fn restart_current_process() -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        let exe_str = current_exe.to_string_lossy().to_string();
-        let mut cmd_str = format!("timeout /t 1 /nobreak >nul & start \"\" \"{}\"", exe_str);
-        for arg in args {
-            cmd_str.push_str(&format!(" \"{}\"", arg));
-        }
+        let exe_path = current_exe.to_string_lossy().to_string();
+        let arg_str = if args.is_empty() {
+            String::new()
+        } else {
+            let escaped_args: Vec<String> = args
+                .iter()
+                .map(|a| format!("'{}'", a.replace('\'', "''")))
+                .collect();
+            format!(" -ArgumentList {}", escaped_args.join(","))
+        };
+        // PowerShellのシングルクォートでパスを囲み、cmd.exe由来のバックスラッシュ誤認識やstartコマンドのエラーを完全に防ぐ
+        let ps_script = format!(
+            "Start-Sleep -Milliseconds 800; Start-Process -FilePath '{}'{}",
+            exe_path.replace('\'', "''"),
+            arg_str
+        );
 
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/c", &cmd_str]);
+        let mut cmd = Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &ps_script,
+        ]);
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.spawn()
             .map_err(|e| format!("再起動プロセスの起動に失敗しました: {}", e))?;
