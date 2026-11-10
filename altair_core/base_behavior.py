@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 import os
 import socket
 import struct
@@ -199,19 +200,30 @@ class GamepadState:
     ゲームコントローラーの各スイッチやスティックの入力を変数として保持するクラス
     """
 
+    # 入力更新がこの秒数途絶えたらニュートラル値を返す (ネイティブ入力のキープアライブは 50ms 周期)
+    STALE_TIMEOUT = 0.5
+
     def __init__(self):
         self.axes = [0.0] * 8
         self.buttons = [False] * 16
         self.last_updated = 0.0
 
     def get_button(self, index):
-        if 0 <= index < len(self.buttons):
-            return bool(self.buttons[index])
+        # コントローラー切断や通信途絶時に最後の押下状態が残り続けないようにする
+        if not self.is_connected(self.STALE_TIMEOUT):
+            return False
+        buttons = self.buttons
+        if 0 <= index < len(buttons):
+            return bool(buttons[index])
         return False
 
     def get_axis(self, index):
-        if 0 <= index < len(self.axes):
-            return float(self.axes[index])
+        # 途絶時に最後のスティック値が残るとロボットが走り続けるため 0.0 を返す
+        if not self.is_connected(self.STALE_TIMEOUT):
+            return 0.0
+        axes = self.axes
+        if 0 <= index < len(axes):
+            return float(axes[index])
         return 0.0
 
     def is_connected(self, timeout=1.0):
@@ -231,7 +243,12 @@ class MddClient:
         self._last_targets = None
 
     def set_targets(self, targets):
-        float_targets = [float(t) for t in targets]
+        # NaN / inf は json.dumps で "NaN" などの非標準JSONになり、サーバー側でパースに失敗して
+        # コマンドが黙って捨てられる (= 直前の目標値で走り続ける)。安全側の 0.0 に置き換える
+        float_targets = []
+        for t in targets:
+            v = float(t)
+            float_targets.append(v if math.isfinite(v) else 0.0)
         now = time.monotonic()
 
         # ループ周期を最大200Hz (5ms) に安定制御し、メインスレッドのGIL独占とビジーループを完全に排除

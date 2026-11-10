@@ -137,7 +137,7 @@ pub fn resolve_project_root() -> PathBuf {
 }
 
 /// HTTP REST API + WebSocket サーバーを起動
-pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
+pub async fn start_altair_server(bind_ip: std::net::IpAddr, port: u16) -> Result<AppState, String> {
     let project_root = resolve_project_root();
     let config_path = project_root.join("config").join("modules_config.json");
     let profiles_dir = project_root.join("profiles");
@@ -174,12 +174,12 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
     let usb_for_send = usb_bridge.clone();
     let mode_for_send = active_mode.clone();
 
-    let send_can_fn = Arc::new(move |id: u16, data: &[u8], channel: &str| {
+    let send_can_fn = Arc::new(move |id: u16, data: &[u8], channel: &str, is_config: bool| {
         let mode = mode_for_send.lock().unwrap().clone();
         if mode == "usb" {
             usb_for_send.send_can_frame(id, data);
         } else {
-            eth_for_send.send_can_frame(id, data, channel);
+            eth_for_send.send_can_frame(id, data, channel, is_config);
         }
     });
 
@@ -259,7 +259,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         });
     }
 
-    // ネイティブゲームパッド監視サービスを起動 (50Hz バックグラウンド取得)
+    // ネイティブゲームパッド監視サービスを起動 (イベント駆動のバックグラウンド取得)
     {
         let gp_service = crate::gamepad_service::GamepadService::new();
         gp_service.start(ws_tx.clone());
@@ -325,18 +325,91 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/js/vendor/python_compressed.js", get(serve_blockly_python_js))
         .route("/js/vendor/ja.js", get(serve_blockly_ja_js))
         .nest_service("/docs", ServeDir::new(project_root.join("docs")))
+        // 全リクエストに Host / Origin 検証を掛けて、DNSリバインディングや
+        // 外部サイトからのクロスサイトリクエスト (CSRF / WebSocket ハイジャック) を拒否する
+        .layer(axum::middleware::from_fn(guard_host_and_origin))
         .with_state(state.clone());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr = SocketAddr::new(bind_ip, port);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("ポート {} のバインドに失敗しました: {}", port, e))?;
 
     tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        // axum 0.7 は既定で TCP_NODELAY を設定しないため、ゲームパッド入力のような小さな WS フレームが
+        // Nagle アルゴリズムと遅延ACKの組み合わせで溜め込まれて遅延する。明示的に無効化する
+        let _ = axum::serve(listener, app).tcp_nodelay(true).await;
     });
 
     Ok(state)
+}
+
+/// Host ヘッダからポート部分を取り除いたホスト名を返す
+fn host_without_port(host: &str) -> &str {
+    let host = host.trim();
+    if let Some(rest) = host.strip_prefix('[') {
+        // IPv6 リテラル: [::1]:8000
+        return rest.split(']').next().unwrap_or("");
+    }
+    match host.rsplit_once(':') {
+        Some((h, p)) if !h.contains(':') && p.chars().all(|c| c.is_ascii_digit()) => h,
+        _ => host,
+    }
+}
+
+/// 接続を許可するホスト名か判定する
+/// localhost と IP アドレス直指定のみ許可し、DNS 名経由のアクセス (DNSリバインディング) を拒否する。
+/// mDNS 名などを使う場合は ALTAIR_ALLOWED_HOSTS にカンマ区切りで追加できる
+fn is_allowed_host(host_header: &str) -> bool {
+    let host = host_without_port(host_header).to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    if host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    std::env::var("ALTAIR_ALLOWED_HOSTS")
+        .map(|list| {
+            list.split(',')
+                .map(|s| s.trim().to_ascii_lowercase())
+                .any(|s| !s.is_empty() && s == host)
+        })
+        .unwrap_or(false)
+}
+
+/// Origin ヘッダが Host ヘッダと同一オリジンか判定する
+fn origin_matches_host(origin: &str, host_header: &str) -> bool {
+    let rest = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"));
+    match rest {
+        Some(o) => o.trim_end_matches('/').eq_ignore_ascii_case(host_header.trim()),
+        None => false,
+    }
+}
+
+async fn guard_host_and_origin(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let headers = req.headers();
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    if !is_allowed_host(&host) {
+        return (StatusCode::FORBIDDEN, "Forbidden host").into_response();
+    }
+    // Python Behavior など Origin を送らないクライアントは許可し、
+    // ブラウザからの別オリジン (外部サイト / null) のリクエストは拒否する
+    if let Some(origin) = headers.get(axum::http::header::ORIGIN) {
+        let origin = origin.to_str().unwrap_or("");
+        if !origin_matches_host(origin, &host) {
+            return (StatusCode::FORBIDDEN, "Cross-origin request rejected").into_response();
+        }
+    }
+    next.run(req).await
 }
 
 async fn api_ports() -> impl IntoResponse {
@@ -669,7 +742,13 @@ async fn api_behavior_open_vscode(
     State(state): State<AppState>,
     Json(req): Json<OpenVscodeReq>,
 ) -> impl IntoResponse {
-    let script_path = state.behavior_runner.get_behaviors_dir().join(&req.name);
+    // name を検証せずに cmd /c へ渡していたため、"a&calc" のような名前でコマンドインジェクションや
+    // user_behaviors 外のパス指定が可能だった。Behavior と同じファイル名検証を通す
+    let safe_name = match BehaviorRunner::sanitize_py_filename(&req.name) {
+        Ok(n) => n,
+        Err(e) => return Json(json!({ "success": false, "message": e })),
+    };
+    let script_path = state.behavior_runner.get_behaviors_dir().join(&safe_name);
     let target = if let Some(line) = req.line {
         format!("{}:{}", script_path.to_string_lossy(), line)
     } else {
@@ -1020,11 +1099,20 @@ async fn api_open_url(Json(req): Json<OpenUrlReq>) -> impl IntoResponse {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Json(json!({ "success": false, "message": "無効なURLです。" }));
     }
+    // 以前は cmd /C start に渡していたため "http://x&calc" のような URL で任意コマンドが実行できた。
+    // シェルの特殊文字や空白/制御文字を含む URL は拒否し、シェルを経由せずに開く
+    if url
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || "\"'<>^&|%!`(){};,".contains(c))
+    {
+        return Json(json!({ "success": false, "message": "URLに使用できない文字が含まれています。" }));
+    }
 
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
+        let _ = std::process::Command::new("rundll32.exe")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(&url)
             .spawn();
     }
     #[cfg(target_os = "linux")]
@@ -1049,6 +1137,7 @@ async fn ws_handler(
 }
 
 async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
+    let is_behavior_client = filter == "behavior";
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.ws_tx.subscribe();
 
@@ -1178,7 +1267,12 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
                             .unwrap_or_default();
 
                         // Python Behavior などの他クライアントへゲームパッド入力を転送
-                        let _ = ws_tx.send(WsEvent::GamepadInput { buttons, axes });
+                        // source を "browser" にして、WebUI がネイティブ入力と誤認しないようにする
+                        let _ = ws_tx.send(WsEvent::GamepadInput {
+                            buttons,
+                            axes,
+                            source: Some("browser".to_string()),
+                        });
                     }
                     _ => {}
                 }
@@ -1187,5 +1281,11 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
     }
 
     send_task.abort();
+
+    // Python Behavior の WS が切断された (異常終了 / ハングによる強制終了など) 場合、
+    // 最後に送られた目標値が制御ループで送り続けられてロボットが暴走しないよう目標値をゼロにする
+    if is_behavior_client {
+        mm.stop_modules_keep_running();
+    }
 }
 

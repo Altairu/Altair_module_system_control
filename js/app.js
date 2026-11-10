@@ -202,6 +202,10 @@ document.addEventListener("DOMContentLoaded", () => {
         break;
 
       case "gamepad_input":
+        // サーバーはブラウザ自身が送った入力も全クライアントへ転送するため、
+        // source を見ずに時刻を更新すると自分のエコーを"バックエンド取得中"と誤認して送信を止め、
+        // Python 側の入力が約1秒ごとにしか更新されなくなっていた。ネイティブ入力のときだけ更新する
+        if (msg.source !== "native") break;
         window.backendGamepadLastReceived = Date.now();
         if (typeof window.updateGamepadMonitorFromBackend === "function") {
           window.updateGamepadMonitorFromBackend(msg.axes, msg.buttons);

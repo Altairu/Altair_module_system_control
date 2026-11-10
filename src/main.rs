@@ -17,13 +17,28 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(8000);
 
+    // 待受アドレス: 認証のない API (Python コードの保存/実行を含む) を LAN に公開しないよう、
+    // GUI モードは既定で 127.0.0.1 のみで待ち受ける。
+    // ヘッドレス (ロボット搭載PCをスマホ等から操作する運用) は従来通り 0.0.0.0。
+    // どちらも ALTAIR_BIND_ADDR で上書きできる
+    let bind_ip: std::net::IpAddr = std::env::var("ALTAIR_BIND_ADDR")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or_else(|| {
+            if headless {
+                std::net::IpAddr::from([0, 0, 0, 0])
+            } else {
+                std::net::IpAddr::from([127, 0, 0, 1])
+            }
+        });
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Tokioランタイムの初期化に失敗しました");
 
     let app_state = rt
-        .block_on(server::start_altair_server(port))
+        .block_on(server::start_altair_server(bind_ip, port))
         .expect("Altair_module_system_control のバックエンドサーバー起動に失敗しました");
 
     if headless {

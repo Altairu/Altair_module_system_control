@@ -162,6 +162,9 @@ pub enum WsEvent {
     GamepadInput {
         buttons: Vec<bool>,
         axes: Vec<f64>,
+        /// 入力元 ("native" = Rust の gilrs, "browser" = WebUI の Gamepad API)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
 }
 

@@ -51,14 +51,14 @@ struct ManagerInner {
 pub struct ModuleManager {
     config_path: PathBuf,
     inner: Arc<Mutex<ManagerInner>>,
-    send_can_fn: Arc<dyn Fn(u16, &[u8], &str) + Send + Sync>,
+    send_can_fn: Arc<dyn Fn(u16, &[u8], &str, bool) + Send + Sync>,
     ws_tx: broadcast::Sender<WsEvent>,
 }
 
 impl ModuleManager {
     pub fn new(
         config_path: PathBuf,
-        send_can_fn: Arc<dyn Fn(u16, &[u8], &str) + Send + Sync>,
+        send_can_fn: Arc<dyn Fn(u16, &[u8], &str, bool) + Send + Sync>,
         ws_tx: broadcast::Sender<WsEvent>,
     ) -> Self {
         let mgr = Self {
@@ -186,7 +186,7 @@ impl ModuleManager {
 
         // コマンド受信時に即時CAN送信を行うことで、定期ループ（10ms）待ちの遅延を完全に排除
         if let Some((can_id, payload)) = frame_opt {
-            (self.send_can_fn)(can_id, &payload, "can1");
+            (self.send_can_fn)(can_id, &payload, "can1", false);
         }
     }
 
@@ -237,9 +237,9 @@ impl ModuleManager {
                 continue;
             };
             if m.module_type == "mdd" {
-                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1");
+                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1", false);
             } else if m.module_type == "solenoid" {
-                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1");
+                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1", false);
             }
         }
     }
@@ -265,9 +265,9 @@ impl ModuleManager {
                 continue;
             };
             if m.module_type == "mdd" {
-                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1");
+                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1", false);
             } else if m.module_type == "solenoid" {
-                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1");
+                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1", false);
             }
         }
     }
@@ -312,7 +312,7 @@ impl ModuleManager {
             list
         };
         for (can_id, payload) in frames {
-            (self.send_can_fn)(can_id, &payload, "can1");
+            (self.send_can_fn)(can_id, &payload, "can1", false);
         }
     }
 
@@ -414,7 +414,7 @@ impl ModuleManager {
                     payload[4..6].copy_from_slice(&encode_int16_le(d_int));
                     payload[6..8].copy_from_slice(&encode_int16_le(dia_int));
 
-                    (self.send_can_fn)(base_id + idx, &payload, "can1");
+                    (self.send_can_fn)(base_id + idx, &payload, "can1", true);
                     // 3連送(約5ms) + STM32側15ms保持ウィンドウ + ポーリング余裕を確保するため35ms待機
                     tokio::time::sleep(Duration::from_millis(35)).await;
                 }
@@ -433,7 +433,7 @@ impl ModuleManager {
                     g.mdd_param_sent_at.insert(base_id, Instant::now());
                 }
 
-                (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1");
+                (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1", true);
                 tokio::time::sleep(Duration::from_millis(40)).await;
 
                 // 起動直後のマイコンおよび他マイコンが 500ms CANタイムアウト(Err:0x01)にならないよう目標値フレームを送出
@@ -787,7 +787,7 @@ impl ModuleManager {
                 };
 
                 for (id, payload) in frames_to_send {
-                    (send_can_fn)(id, &payload, "can1");
+                    (send_can_fn)(id, &payload, "can1", false);
                 }
 
                 let target_period =

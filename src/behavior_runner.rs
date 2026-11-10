@@ -100,7 +100,7 @@ impl BehaviorRunner {
         self.behaviors_dir.clone()
     }
 
-    fn sanitize_py_filename(name: &str) -> Result<String, String> {
+    pub(crate) fn sanitize_py_filename(name: &str) -> Result<String, String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return Err("ファイル名が空です。".to_string());
@@ -111,6 +111,14 @@ impl BehaviorRunner {
             .unwrap_or_default();
         if safe.is_empty() || safe.contains("..") || safe.contains('/') || safe.contains('\\') {
             return Err("無効なファイル名です。".to_string());
+        }
+        // ファイル名は cmd /c (VSCode 起動) などに渡るため、英数字 (日本語含む) と _ - . 以外を拒否して
+        // & | ^ % " などシェルの特殊文字によるコマンドインジェクションを防ぐ
+        if !safe
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+        {
+            return Err("ファイル名に使用できるのは英数字と _ - . のみです。".to_string());
         }
         let clean = if !safe.ends_with(".py") {
             format!("{}.py", safe)

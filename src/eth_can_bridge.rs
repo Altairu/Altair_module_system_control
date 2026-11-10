@@ -75,12 +75,6 @@ impl EthCanBridge {
         bridge
     }
 
-    /// 設定フレーム (0x200..0x203, 0x210) かどうかを判定
-    pub fn is_config_can_id(can_id: u16) -> bool {
-        let sub_id = can_id & 0x0FF;
-        can_id >= 0x200 && sub_id < 0x20
-    }
-
     fn normalize_channel(ch: &str) -> String {
         match ch.trim().to_ascii_lowercase().as_str() {
             "can2" => "can2".to_string(),
@@ -214,7 +208,12 @@ impl EthCanBridge {
     }
 
     /// CANフレームを送信キューへ登録
-    pub fn send_can_frame(&self, id: u16, data: &[u8], channel: &str) {
+    ///
+    /// is_config_frame は MDD のパラメータ/起動トリガ (Base ID + 0x00..0x03, 0x10) のときだけ true にする。
+    /// 以前は CAN ID の値 (0x200 以上かつ下位バイトが 0x20 未満) で判定していたため、
+    /// 0x300 の電磁弁など通常の周期フレームまで設定フレーム扱いになり、3連送と 8ms/15ms の保持待ちで
+    /// 毎周期 MDD 目標値フレームの送出が遅れていた
+    pub fn send_can_frame(&self, id: u16, data: &[u8], channel: &str, is_config_frame: bool) {
         let mut guard = self.inner.lock().unwrap();
         if !guard.is_connected {
             return;
@@ -254,7 +253,6 @@ impl EthCanBridge {
             }
         }
 
-        let is_config_frame = Self::is_config_can_id(standard_id);
         let item = TxQueueItem {
             can_id: standard_id,
             send_to_can2,

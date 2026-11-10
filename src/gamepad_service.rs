@@ -12,6 +12,9 @@ extern "system" {
     fn timeBeginPeriod(uPeriod: u32) -> u32;
 }
 
+/// ネイティブ取得したゲームパッド入力であることを示す source 値
+pub const GAMEPAD_SOURCE_NATIVE: &str = "native";
+
 /// バックグラウンドでネイティブゲームパッド (XInput / DirectInput) を監視・配信するサービス
 pub struct GamepadService {
     is_running: Arc<AtomicBool>,
@@ -24,7 +27,7 @@ impl GamepadService {
         }
     }
 
-    /// 50Hz (20ms周期) のポーリングスレッドを起動
+    /// イベント駆動 (無入力時は最大10ms間隔) の監視スレッドを起動
     pub fn start(&self, ws_tx: broadcast::Sender<WsEvent>) {
         if self.is_running.swap(true, Ordering::SeqCst) {
             return; // 既に実行中
@@ -54,7 +57,11 @@ impl GamepadService {
 
             while is_running.load(Ordering::Relaxed) {
                 // 1. 新しいイベント（接続、切断、ボタンなど）を処理
-                while let Some(Event { id, event, .. }) = gilrs.next_event() {
+                // 以前は 10ms 固定スリープでポーリングしていたため、入力から検出まで最大 10ms 余計に遅れていた。
+                // 最初の1件はブロッキング待ちにして入力イベント到着と同時に起床し、残りはノンブロッキングで吸い出す
+                let mut lost_active = false;
+                let mut pending = gilrs.next_event_blocking(Some(Duration::from_millis(10)));
+                while let Some(Event { id, event, .. }) = pending {
                     match event {
                         EventType::Connected => {
                             let name = gilrs.gamepad(id).name().to_string();
@@ -65,10 +72,28 @@ impl GamepadService {
                             println!("[WARN] ネイティブゲームパッド切断を検知 (ID: {:?})", id);
                             if last_connected_id == Some(id) {
                                 last_connected_id = None;
+                                lost_active = true;
                             }
                         }
                         _ => {}
                     }
+                    pending = gilrs.next_event();
+                }
+                gilrs.inc();
+
+                // 使用中のゲームパッドが切断された場合、最後の入力値が残ったままロボットが走り続けないよう
+                // ニュートラル状態を1回配信してから次の候補を探す
+                if lost_active {
+                    let axes = vec![0.0; 6];
+                    let buttons = vec![false; 16];
+                    last_axes = axes.clone();
+                    last_buttons = buttons.clone();
+                    last_sent_time = Instant::now();
+                    let _ = ws_tx.send(WsEvent::GamepadInput {
+                        buttons,
+                        axes,
+                        source: Some(GAMEPAD_SOURCE_NATIVE.to_string()),
+                    });
                 }
 
                 // 2. 有効なゲームパッドを探索（最後に接続されたもの、または現在アクティブなもの）
@@ -133,13 +158,16 @@ impl GamepadService {
                         last_buttons = buttons.clone();
                         last_sent_time = Instant::now();
 
-                        // WebSocket 経由で Python Behavior および WebUI モニターへ最大100Hzで直接ブロードキャスト
-                        let _ = ws_tx.send(WsEvent::GamepadInput { buttons, axes });
+                        // WebSocket 経由で Python Behavior および WebUI モニターへ直接ブロードキャスト
+                        // source を付けることで WebUI 側がブラウザ自身の送信のエコーと区別できる
+                        let _ = ws_tx.send(WsEvent::GamepadInput {
+                            buttons,
+                            axes,
+                            source: Some(GAMEPAD_SOURCE_NATIVE.to_string()),
+                        });
                     }
                 }
-
-                // 10ms待機 (100Hzポーリング) でスティック入力変化を低遅延検出
-                std::thread::sleep(Duration::from_millis(10));
+                // 待機は先頭の next_event_blocking が担うため、ここでの固定スリープは不要
             }
         });
     }
