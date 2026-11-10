@@ -309,6 +309,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/update/apply", post(api_update_apply))
         .route("/api/system/restart", post(api_system_restart))
         .route("/api/system/uninstall", post(api_uninstall))
+        .route("/api/system/emergency_stop", post(api_system_emergency_stop))
         .route("/api/open_url", post(api_open_url))
         .route("/ws", get(ws_handler))
         // UIファイルはexeに埋め込んで配信する
@@ -489,6 +490,7 @@ async fn api_behavior_start(
     State(state): State<AppState>,
     Json(req): Json<BehaviorStartReq>,
 ) -> impl IntoResponse {
+    state.module_manager.resume_control_if_ready();
     match state.behavior_runner.start_behavior(&req.behavior_name) {
         Ok(msg) => Json(json!({ "success": true, "message": msg })),
         Err(err) => Json(json!({ "success": false, "message": err })),
@@ -497,7 +499,7 @@ async fn api_behavior_start(
 
 async fn api_behavior_stop(State(state): State<AppState>) -> impl IntoResponse {
     let msg = state.behavior_runner.stop_behavior();
-    state.module_manager.emergency_stop_all();
+    state.module_manager.stop_modules_keep_running();
     Json(json!({ "success": true, "message": msg }))
 }
 
@@ -963,6 +965,15 @@ async fn api_system_restart() -> impl IntoResponse {
             })),
         ),
     }
+}
+
+async fn api_system_emergency_stop(State(state): State<AppState>) -> impl IntoResponse {
+    let _ = state.behavior_runner.stop_behavior();
+    state.module_manager.emergency_stop_all();
+    Json(json!({
+        "success": true,
+        "message": "全モータおよびプログラムを非常停止しました。"
+    }))
 }
 
 async fn api_uninstall() -> impl IntoResponse {

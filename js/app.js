@@ -2383,8 +2383,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // 動作プログラムの強制終了
-    await fetch("/api/behavior/stop", { method: "POST" });
+    // 非常停止 API の呼び出し (全モータ即時停止 + パラメータ設定モードへリセット)
+    try {
+      await fetch("/api/system/emergency_stop", { method: "POST" });
+    } catch (err) {
+      console.error("非常停止API呼び出しエラー:", err);
+    }
+    state.controlMode = "SETUP";
+    if (el.lblControlModeStatus) {
+      el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-danger">非常停止 (待機中)</span>';
+    }
   });
 
   // 設定保存用APIの呼び出し

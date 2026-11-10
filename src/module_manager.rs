@@ -242,6 +242,42 @@ impl ModuleManager {
         }
     }
 
+    /// 動作プログラム停止時用: 全モータの目標値をゼロクリアして停止フレームを即時送信するが、
+    /// 制御実行状態 (is_running) は維持してキープアライブを継続し、再起動時に即座に動作できるようにする
+    pub fn stop_modules_keep_running(&self) {
+        let modules = {
+            let mut g = self.inner.lock().unwrap();
+            let mods = g.config.modules.clone();
+            for m in &mods {
+                if m.module_type == "mdd" {
+                    g.mdd_targets.insert(m.name.clone(), [0.0; 4]);
+                } else if m.module_type == "solenoid" {
+                    g.solenoid_valves.insert(m.name.clone(), [false; 12]);
+                }
+            }
+            mods
+        };
+
+        for m in modules {
+            let Some(base_id) = parse_hex_id(&m.base_id) else {
+                continue;
+            };
+            if m.module_type == "mdd" {
+                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1");
+            } else if m.module_type == "solenoid" {
+                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1");
+            }
+        }
+    }
+
+    /// 動作プログラム起動時用: 制御実行状態を有効化 (パラメータ送信中以外)
+    pub fn resume_control_if_ready(&self) {
+        let mut g = self.inner.lock().unwrap();
+        if !g.is_sending_params {
+            g.is_running = true;
+        }
+    }
+
     /// 既に制御実行状態 (system_status == 1) または起動トリガ送信済みのMDDへ生存維持用の目標値フレームを送出
     fn send_keepalive_to_confirmed_mdds(&self) {
         let frames: Vec<(u16, [u8; 8])> = {
