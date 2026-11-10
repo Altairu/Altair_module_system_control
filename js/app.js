@@ -2389,10 +2389,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnCloseUpdateModal = document.getElementById("btn-close-update-modal");
   const btnCancelUpdateModal = document.getElementById("btn-cancel-update-modal");
   const btnExecUpdateModal = document.getElementById("btn-exec-update-modal");
+  const btnRestartNow = document.getElementById("btn-restart-now");
   const lblModalCurVer = document.getElementById("lbl-modal-cur-ver");
   const lblModalLatestVer = document.getElementById("lbl-modal-latest-ver");
   const lblUpdateModalMsg = document.getElementById("lbl-update-modal-msg");
   const boxUpdateReleaseNotes = document.getElementById("box-update-release-notes");
+  const progressContainer = document.getElementById("update-progress-container");
+  const progressSpinner = document.getElementById("update-progress-spinner");
+  const progressStep = document.getElementById("update-progress-step");
+  const progressTimer = document.getElementById("update-progress-timer");
+  const progressBarFill = document.getElementById("update-progress-bar-fill");
+  const progressDetail = document.getElementById("update-progress-detail");
 
   // ヘルプ / 権利情報モーダル要素
   const helpAboutModal = document.getElementById("help-about-modal");
@@ -2435,29 +2442,218 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  let updateTimerInterval = null;
+
+  async function triggerAppRestart() {
+    if (progressStep) progressStep.textContent = "アプリを再起動中...";
+    if (progressDetail) progressDetail.textContent = "新しいプロセスを起動しています。まもなく画面が再読み込みされます...";
+    if (btnRestartNow) {
+      btnRestartNow.disabled = true;
+      btnRestartNow.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 再起動中...`;
+    }
+
+    try {
+      await fetch("/api/system/restart", { method: "POST" });
+    } catch (_) {
+      // サーバープロセスが終了するとfetchがエラーになる場合があるが正常
+    }
+
+    // サーバーが新プロセスで立ち上がるまでポーリングし、応答があれば画面をリロード
+    let pollCount = 0;
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+      try {
+        const res = await fetch("/api/update/check", { cache: "no-store" });
+        if (res.ok) {
+          clearInterval(pollInterval);
+          window.location.reload();
+        }
+      } catch (_) {
+        // まだ起動準備中
+      }
+      if (pollCount > 30) {
+        clearInterval(pollInterval);
+        if (progressDetail) {
+          progressDetail.textContent = "再起動に時間がかかっています。手動でアプリを起動してください。";
+        }
+      }
+    }, 1000);
+  }
+
   async function executeSelfUpdate() {
-    if (!confirm("GitHub Releases から最新バージョンをダウンロードして更新しますか？")) return;
+    // モーダルが閉じていれば開く
+    if (updateModal && !updateModal.classList.contains("active")) {
+      updateModal.classList.add("active");
+    }
+
+    if (!confirm("GitHub Releases から最新バージョンをダウンロードして更新しますか？\n更新完了後、アプリは自動で再起動されます。")) {
+      return;
+    }
+
+    // UI状態を更新中へ切り替え
     if (btnApplyUpdate) btnApplyUpdate.disabled = true;
-    if (btnExecUpdateModal) btnExecUpdateModal.disabled = true;
-    if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = "最新バイナリをダウンロードして適用しています...";
+    if (btnExecUpdateModal) btnExecUpdateModal.style.display = "none";
+    if (btnCancelUpdateModal) {
+      btnCancelUpdateModal.disabled = true;
+      btnCancelUpdateModal.textContent = "更新処理中...";
+    }
+    if (btnCloseUpdateModal) btnCloseUpdateModal.disabled = true;
+    if (btnRestartNow) btnRestartNow.style.display = "none";
+
+    // プログレスインジケーター表示
+    if (progressContainer) {
+      progressContainer.style.display = "block";
+    }
+    if (progressSpinner) {
+      progressSpinner.className = "fa-solid fa-circle-notch fa-spin";
+      progressSpinner.style.color = "var(--color-primary, #3b82f6)";
+    }
+    if (progressStep) progressStep.textContent = "最新バイナリをダウンロード中 (1/3)";
+    if (progressBarFill) {
+      progressBarFill.className = "update-progress-bar-fill indeterminate";
+      progressBarFill.style.width = "100%";
+    }
+    if (progressTimer) progressTimer.textContent = "0s";
+    if (progressDetail) {
+      progressDetail.textContent = "GitHub Releases から最新バイナリを受信しています...";
+    }
+    if (lblUpdateModalMsg) {
+      lblUpdateModalMsg.textContent = "ダウンロードと適用を実行しています。しばらくお待ちください...";
+    }
+
     appendTerminalLog(el.behaviorTerminal, "[UPDATE] 最新バイナリをダウンロードして適用中...", "system-msg");
+
+    // 経過秒数タイマー開始（フリーズしていないことの明示）
+    let elapsedSeconds = 0;
+    if (updateTimerInterval) clearInterval(updateTimerInterval);
+    updateTimerInterval = setInterval(() => {
+      elapsedSeconds++;
+      if (progressTimer) progressTimer.textContent = `${elapsedSeconds}s`;
+
+      if (elapsedSeconds >= 4 && elapsedSeconds < 10) {
+        if (progressStep) progressStep.textContent = "バイナリを受信中... (1/3)";
+        if (progressDetail) progressDetail.textContent = "GitHub からデータをダウンロードしています。ネットワーク状況により数十秒かかる場合があります...";
+      } else if (elapsedSeconds >= 10 && elapsedSeconds < 25) {
+        if (progressStep) progressStep.textContent = "データ受信・検証中... (2/3)";
+        if (progressDetail) progressDetail.textContent = "大きなアセットをダウンロード中です。処理は正常に進行しています...";
+      } else if (elapsedSeconds >= 25) {
+        if (progressStep) progressStep.textContent = "ファイルを展開・置換中... (2/3)";
+        if (progressDetail) progressDetail.textContent = "アーカイブの展開と実行ファイルの安全な置換を行っています...";
+      }
+    }, 1000);
+
     try {
       const res = await fetch("/api/update/apply", { method: "POST" });
       const data = await res.json();
-      if (data.success) {
+      clearInterval(updateTimerInterval);
+
+      if (data.success && data.updated) {
+        // アップデート成功
         appendTerminalLog(el.behaviorTerminal, `[UPDATE] ${data.message}`, "system-msg");
         if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = data.message;
-        alert(data.message);
+        if (progressSpinner) {
+          progressSpinner.className = "fa-solid fa-circle-check";
+          progressSpinner.style.color = "#10b981";
+        }
+        if (progressStep) progressStep.textContent = "アップデート完了 (3/3)";
+        if (progressBarFill) {
+          progressBarFill.className = "update-progress-bar-fill success";
+          progressBarFill.style.width = "100%";
+        }
+
+        if (btnRestartNow) {
+          btnRestartNow.style.display = "inline-flex";
+          btnRestartNow.disabled = false;
+          btnRestartNow.innerHTML = `<i class="fa-solid fa-rotate-right"></i> 今すぐ再起動`;
+          btnRestartNow.onclick = () => {
+            clearInterval(countdownInterval);
+            triggerAppRestart();
+          };
+        }
+
+        // 2秒カウントダウン後に自動再起動
+        let count = 2;
+        if (progressDetail) {
+          progressDetail.textContent = `${count}秒後にアプリを自動再起動します...`;
+        }
+        const countdownInterval = setInterval(() => {
+          count--;
+          if (count > 0) {
+            if (progressDetail) {
+              progressDetail.textContent = `${count}秒後にアプリを自動再起動します...`;
+            }
+          } else {
+            clearInterval(countdownInterval);
+            triggerAppRestart();
+          }
+        }, 1000);
+
+      } else if (data.success && !data.updated) {
+        // すでに最新
+        appendTerminalLog(el.behaviorTerminal, `[UPDATE] ${data.message}`, "system-msg");
+        if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = data.message;
+        if (progressSpinner) {
+          progressSpinner.className = "fa-solid fa-circle-info";
+          progressSpinner.style.color = "#3b82f6";
+        }
+        if (progressStep) progressStep.textContent = "すでに最新バージョンです";
+        if (progressBarFill) {
+          progressBarFill.className = "update-progress-bar-fill success";
+        }
+        if (progressDetail) progressDetail.textContent = data.message;
+        if (btnCancelUpdateModal) {
+          btnCancelUpdateModal.disabled = false;
+          btnCancelUpdateModal.textContent = "閉じる";
+        }
+        if (btnCloseUpdateModal) btnCloseUpdateModal.disabled = false;
+
       } else {
+        // エラー
         appendTerminalLog(el.behaviorTerminal, `[ERROR] ${data.message}`, "error-msg");
         if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = `エラー: ${data.message}`;
+        if (progressSpinner) {
+          progressSpinner.className = "fa-solid fa-circle-xmark";
+          progressSpinner.style.color = "#ef4444";
+        }
+        if (progressStep) progressStep.textContent = "アップデート失敗";
+        if (progressBarFill) {
+          progressBarFill.className = "update-progress-bar-fill error";
+        }
+        if (progressDetail) progressDetail.textContent = data.message;
         if (btnApplyUpdate) btnApplyUpdate.disabled = false;
-        if (btnExecUpdateModal) btnExecUpdateModal.disabled = false;
+        if (btnExecUpdateModal) {
+          btnExecUpdateModal.style.display = "inline-flex";
+          btnExecUpdateModal.disabled = false;
+        }
+        if (btnCancelUpdateModal) {
+          btnCancelUpdateModal.disabled = false;
+          btnCancelUpdateModal.textContent = "閉じる";
+        }
+        if (btnCloseUpdateModal) btnCloseUpdateModal.disabled = false;
       }
     } catch (err) {
+      clearInterval(updateTimerInterval);
       appendTerminalLog(el.behaviorTerminal, `[ERROR] アップデート適用エラー: ${err}`, "error-msg");
+      if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = `通信エラー: ${err}`;
+      if (progressSpinner) {
+        progressSpinner.className = "fa-solid fa-circle-xmark";
+        progressSpinner.style.color = "#ef4444";
+      }
+      if (progressStep) progressStep.textContent = "アップデート失敗";
+      if (progressBarFill) {
+        progressBarFill.className = "update-progress-bar-fill error";
+      }
+      if (progressDetail) progressDetail.textContent = String(err);
       if (btnApplyUpdate) btnApplyUpdate.disabled = false;
-      if (btnExecUpdateModal) btnExecUpdateModal.disabled = false;
+      if (btnExecUpdateModal) {
+        btnExecUpdateModal.style.display = "inline-flex";
+        btnExecUpdateModal.disabled = false;
+      }
+      if (btnCancelUpdateModal) {
+        btnCancelUpdateModal.disabled = false;
+        btnCancelUpdateModal.textContent = "閉じる";
+      }
+      if (btnCloseUpdateModal) btnCloseUpdateModal.disabled = false;
     }
   }
 
@@ -2467,6 +2663,13 @@ document.addEventListener("DOMContentLoaded", () => {
       if (lblUpdateModalMsg) lblUpdateModalMsg.textContent = "GitHub Releases に問い合わせています...";
       if (boxUpdateReleaseNotes) boxUpdateReleaseNotes.style.display = "none";
       if (btnExecUpdateModal) btnExecUpdateModal.style.display = "none";
+      if (btnRestartNow) btnRestartNow.style.display = "none";
+      if (progressContainer) progressContainer.style.display = "none";
+      if (btnCancelUpdateModal) {
+        btnCancelUpdateModal.disabled = false;
+        btnCancelUpdateModal.textContent = "閉じる";
+      }
+      if (btnCloseUpdateModal) btnCloseUpdateModal.disabled = false;
       updateModal.classList.add("active");
     }
 
@@ -2527,10 +2730,16 @@ document.addEventListener("DOMContentLoaded", () => {
     btnExecUpdateModal.addEventListener("click", executeSelfUpdate);
   }
   if (btnCloseUpdateModal && updateModal) {
-    btnCloseUpdateModal.addEventListener("click", () => updateModal.classList.remove("active"));
+    btnCloseUpdateModal.addEventListener("click", () => {
+      if (btnCloseUpdateModal.disabled) return;
+      updateModal.classList.remove("active");
+    });
   }
   if (btnCancelUpdateModal && updateModal) {
-    btnCancelUpdateModal.addEventListener("click", () => updateModal.classList.remove("active"));
+    btnCancelUpdateModal.addEventListener("click", () => {
+      if (btnCancelUpdateModal.disabled) return;
+      updateModal.classList.remove("active");
+    });
   }
 
   if (btnReportIssue) {

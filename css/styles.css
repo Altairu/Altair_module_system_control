@@ -1957,3 +1957,41 @@ body {
 .scope-stat-card.stat-error .scope-stat-value {
   color: #81c995;
 }
+
+/* --- アップデート進捗用スタイル --- */
+.update-progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.update-progress-bar-fill.indeterminate {
+  width: 100% !important;
+  background: linear-gradient(
+    90deg,
+    rgba(59, 130, 246, 0.25) 0%,
+    rgba(59, 130, 246, 0.85) 50%,
+    rgba(59, 130, 246, 0.25) 100%
+  );
+  background-size: 200% 100%;
+  animation: update-progress-indeterminate 1.4s infinite linear;
+}
+
+@keyframes update-progress-indeterminate {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.update-progress-bar-fill.success {
+  background: #10b981 !important;
+}
+
+.update-progress-bar-fill.error {
+  background: #ef4444 !important;
+}

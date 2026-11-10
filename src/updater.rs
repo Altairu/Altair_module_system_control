@@ -84,8 +84,15 @@ pub fn check_github_update() -> UpdateCheckResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateApplyResult {
+    pub updated: bool,
+    pub version: String,
+    pub message: String,
+}
+
 /// GitHub Releases から最新バイナリをダウンロードし、実行中の .exe を自己更新する
-pub fn apply_github_update() -> Result<String, String> {
+pub fn apply_github_update() -> Result<UpdateApplyResult, String> {
     let current = env!("CARGO_PKG_VERSION");
 
     let status = self_update::backends::github::Update::configure()
@@ -101,15 +108,23 @@ pub fn apply_github_update() -> Result<String, String> {
         .map_err(|e| format!("アップデート適用エラー: {}", e))?;
 
     if status.updated() {
-        Ok(format!(
-            "バージョン v{} へのアップデートが完了しました。アプリを再起動してください。",
-            status.version()
-        ))
+        Ok(UpdateApplyResult {
+            updated: true,
+            version: status.version().to_string(),
+            message: format!(
+                "バージョン v{} へのアップデートが完了しました。",
+                status.version()
+            ),
+        })
     } else {
-        Ok(format!(
-            "すでに最新バージョン (v{}) です。",
-            status.version()
-        ))
+        Ok(UpdateApplyResult {
+            updated: false,
+            version: status.version().to_string(),
+            message: format!(
+                "すでに最新バージョン (v{}) です。",
+                status.version()
+            ),
+        })
     }
 }
 

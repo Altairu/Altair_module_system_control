@@ -786,9 +786,27 @@
           GitHub Releases を確認しています...
         </p>
         <div id="box-update-release-notes" style="display: none; background: #f8f9fa; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; font-size: 12px; max-height: 180px; overflow-y: auto; white-space: pre-wrap;"></div>
+
+        <!-- アップデート進行中 / 完了インジケーター -->
+        <div id="update-progress-container" style="display: none; margin-top: 14px; padding: 14px; background: rgba(0,0,0,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <i class="fa-solid fa-circle-notch fa-spin" id="update-progress-spinner" style="font-size: 16px; color: var(--color-primary, #3b82f6);"></i>
+            <span id="update-progress-step" style="font-weight: 600; font-size: 13px; color: var(--text-main);">ダウンロード準備中...</span>
+            <span id="update-progress-timer" style="margin-left: auto; font-size: 11px; color: var(--text-muted); font-family: 'Consolas', monospace;">0s</span>
+          </div>
+          <div class="update-progress-bar-bg" style="width: 100%; height: 8px; background: rgba(0,0,0,0.08); border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
+            <div id="update-progress-bar-fill" class="update-progress-bar-fill indeterminate"></div>
+          </div>
+          <div id="update-progress-detail" style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+            GitHub Releases から最新バイナリを取得しています...
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="btn-cancel-update-modal">閉じる</button>
+        <button class="btn btn-primary" id="btn-restart-now" style="display: none;">
+          <i class="fa-solid fa-rotate-right"></i> 今すぐ再起動
+        </button>
         <button class="btn btn-primary" id="btn-exec-update-modal" style="display: none;">
           <i class="fa-solid fa-cloud-arrow-down"></i> 今すぐアップデートを適用
         </button>

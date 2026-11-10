@@ -289,6 +289,7 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/api/config/update", post(api_update_config))
         .route("/api/update/check", get(api_update_check))
         .route("/api/update/apply", post(api_update_apply))
+        .route("/api/system/restart", post(api_system_restart))
         .route("/api/system/uninstall", post(api_uninstall))
         .route("/api/open_url", post(api_open_url))
         .route("/ws", get(ws_handler))
@@ -834,14 +835,94 @@ async fn api_update_check() -> impl IntoResponse {
     Json(res)
 }
 
-async fn api_update_apply() -> impl IntoResponse {
+async fn api_update_apply(State(state): State<AppState>) -> impl IntoResponse {
+    let _ = state.ws_tx.send(WsEvent::BehaviorLog {
+        data: "[UPDATE] 最新リリースのダウンロードおよび適用を開始しました...".to_string(),
+    });
+
     let res = tokio::task::spawn_blocking(updater::apply_github_update)
         .await
         .unwrap_or_else(|e| Err(format!("スレッドエラー: {}", e)));
 
     match res {
-        Ok(msg) => Json(json!({ "success": true, "message": msg })),
-        Err(err) => Json(json!({ "success": false, "message": err })),
+        Ok(info) => {
+            let _ = state.ws_tx.send(WsEvent::BehaviorLog {
+                data: format!("[UPDATE] {}", info.message),
+            });
+            Json(json!({
+                "success": true,
+                "updated": info.updated,
+                "version": info.version,
+                "message": info.message
+            }))
+        }
+        Err(err) => {
+            let _ = state.ws_tx.send(WsEvent::BehaviorLog {
+                data: format!("[ERROR] アップデート失敗: {}", err),
+            });
+            Json(json!({
+                "success": false,
+                "updated": false,
+                "version": "",
+                "message": err
+            }))
+        }
+    }
+}
+
+/// 実行中のアプリケーションプロセスを再起動する
+fn restart_current_process() -> Result<(), String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("実行中プロセスのパス取得に失敗しました: {}", e))?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    #[cfg(target_os = "windows")]
+    {
+        let exe_str = current_exe.to_string_lossy().to_string();
+        let mut cmd_str = format!("timeout /t 1 /nobreak >nul & start \"\" \"{}\"", exe_str);
+        for arg in args {
+            cmd_str.push_str(&format!(" \"{}\"", arg));
+        }
+
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", &cmd_str]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.spawn()
+            .map_err(|e| format!("再起動プロセスの起動に失敗しました: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut cmd = Command::new(&current_exe);
+        cmd.args(&args);
+        cmd.spawn()
+            .map_err(|e| format!("再起動プロセスの起動に失敗しました: {}", e))?;
+    }
+
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        std::process::exit(0);
+    });
+
+    Ok(())
+}
+
+async fn api_system_restart() -> impl IntoResponse {
+    match restart_current_process() {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "message": "再起動を開始しました。"
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "message": e
+            })),
+        ),
     }
 }
 
