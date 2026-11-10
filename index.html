@@ -427,11 +427,20 @@
 
               <div style="display: flex; align-items: center; gap: 4px;">
                 <label style="font-size: 12px; font-weight: 600;">モータ:</label>
-                <select id="scope-motor-select" class="form-input form-input-sm" style="width: 70px;">
+                <select id="scope-motor-select" class="form-input form-input-sm" style="width: 95px;">
                   <option value="0">M1</option>
                   <option value="1">M2</option>
                   <option value="2">M3</option>
                   <option value="3">M4</option>
+                  <option value="all">全モータ</option>
+                </select>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <label style="font-size: 12px; font-weight: 600;">種類:</label>
+                <select id="scope-chart-type-select" class="form-input form-input-sm" style="width: 105px;">
+                  <option value="line" selected>折れ線グラフ</option>
+                  <option value="bar">棒グラフ</option>
                 </select>
               </div>
 
@@ -443,13 +452,29 @@
                 </select>
               </div>
 
-              <div style="display: flex; align-items: center; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 4px;" id="group-scope-range">
                 <label style="font-size: 12px; font-weight: 600;">時間幅:</label>
                 <select id="scope-range-select" class="form-input form-input-sm" style="width: 75px;">
                   <option value="3">3秒</option>
                   <option value="5" selected>5秒</option>
                   <option value="10">10秒</option>
                 </select>
+              </div>
+
+              <!-- 系列表示トグル -->
+              <div class="scope-series-toggles" style="display: flex; align-items: center; gap: 8px; padding: 2px 8px; background: rgba(0, 0, 0, 0.04); border: 1px solid var(--border-color); border-radius: 6px;">
+                <label style="display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: #1a73e8; margin: 0; font-weight: 600;">
+                  <input type="checkbox" id="chk-scope-show-target" checked style="cursor: pointer;"> 目標値
+                </label>
+                <label style="display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: #b06000; margin: 0; font-weight: 600;">
+                  <input type="checkbox" id="chk-scope-show-actual" checked style="cursor: pointer;"> 実測値
+                </label>
+                <label style="display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: #137333; margin: 0; font-weight: 600;">
+                  <input type="checkbox" id="chk-scope-show-error" checked style="cursor: pointer;"> 追従偏差
+                </label>
+                <label style="display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: #d93025; margin: 0; font-weight: 600;">
+                  <input type="checkbox" id="chk-scope-show-sw" checked style="cursor: pointer;"> リミットSW
+                </label>
               </div>
 
               <button class="btn btn-secondary btn-sm" id="btn-scope-pause" style="white-space: nowrap;">
@@ -491,17 +516,17 @@
             <canvas id="scope-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
 
             <!-- 凡例オーバーレイ -->
-            <div class="scope-legend" style="position: absolute; top: 12px; left: 14px; display: flex; gap: 14px; font-size: 11px; background: rgba(0, 0, 0, 0.65); padding: 4px 10px; border-radius: 4px; pointer-events: none;">
-              <span style="color: #4dc9f6; display: flex; align-items: center; gap: 4px;">
+            <div class="scope-legend" id="scope-legend-box" style="position: absolute; top: 12px; left: 14px; display: flex; gap: 14px; font-size: 11px; background: rgba(0, 0, 0, 0.65); padding: 4px 10px; border-radius: 4px; z-index: 10;">
+              <span style="color: #4dc9f6; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-target">
                 <span style="display: inline-block; width: 14px; height: 3px; background: #4dc9f6;"></span> 目標値 (Target)
               </span>
-              <span style="color: #fdd663; display: flex; align-items: center; gap: 4px;">
+              <span style="color: #fdd663; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-actual">
                 <span style="display: inline-block; width: 14px; height: 3px; background: #fdd663;"></span> 実測値 (Actual)
               </span>
-              <span style="color: #81c995; display: flex; align-items: center; gap: 4px;">
+              <span style="color: #81c995; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-error">
                 <span style="display: inline-block; width: 14px; height: 3px; background: #81c995;"></span> 偏差 (Error)
               </span>
-              <span style="color: #f28b82; display: flex; align-items: center; gap: 4px;">
+              <span style="color: #f28b82; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-sw">
                 <span style="display: inline-block; width: 12px; height: 1px; border-top: 2px dashed #f28b82;"></span> リミットSW ON
               </span>
             </div>

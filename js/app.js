@@ -3809,19 +3809,31 @@ if __name__ == '__main__':
     buffers: new Map(), // key: `${modName}_${motorIdx}`, value: Array of samples
     isPaused: false,
     selectedModule: "",
-    selectedMotor: 0,
+    selectedMotor: "0", // "0", "1", "2", "3", or "all"
     selectedMetric: "angle", // "angle" or "speed"
+    chartType: "line", // "line" or "bar"
     rangeSeconds: 5,
+    showTarget: true,
+    showActual: true,
+    showError: true,
+    showSw: true,
     prevSwStates: new Map(), // key: modName, value: [false, false, false, false]
     knownModules: new Set(),
   };
 
   const selScopeModule = document.getElementById("scope-module-select");
   const selScopeMotor = document.getElementById("scope-motor-select");
+  const selScopeChartType = document.getElementById("scope-chart-type-select");
   const selScopeMetric = document.getElementById("scope-metric-select");
   const selScopeRange = document.getElementById("scope-range-select");
+  const groupScopeRange = document.getElementById("group-scope-range");
   const btnScopePause = document.getElementById("btn-scope-pause");
   const btnScopeExportCsv = document.getElementById("btn-scope-export-csv");
+  const chkScopeShowTarget = document.getElementById("chk-scope-show-target");
+  const chkScopeShowActual = document.getElementById("chk-scope-show-actual");
+  const chkScopeShowError = document.getElementById("chk-scope-show-error");
+  const chkScopeShowSw = document.getElementById("chk-scope-show-sw");
+  const scopeLegendBox = document.getElementById("scope-legend-box");
 
   function updateScopeModuleSelect() {
     if (!selScopeModule) return;
@@ -3923,21 +3935,92 @@ if __name__ == '__main__':
     }
   }
 
+  function updateScopeStatCardsVisibility() {
+    const cardTarget = document.querySelector(".scope-stat-card.stat-target");
+    const cardActual = document.querySelector(".scope-stat-card.stat-actual");
+    const cardError = document.querySelector(".scope-stat-card.stat-error");
+    const cardSw = document.querySelector(".scope-stat-card.stat-sw");
+    if (cardTarget) cardTarget.style.display = scopeState.showTarget ? "flex" : "none";
+    if (cardActual) cardActual.style.display = scopeState.showActual ? "flex" : "none";
+    if (cardError) cardError.style.display = scopeState.showError ? "flex" : "none";
+    if (cardSw) cardSw.style.display = scopeState.showSw ? "flex" : "none";
+  }
+
+  function updateScopeLegend() {
+    if (!scopeLegendBox) return;
+    const isAll = scopeState.selectedMotor === "all";
+    const isLine = scopeState.chartType === "line";
+
+    if (isAll && isLine) {
+      scopeLegendBox.innerHTML = `
+        <span style="color: #4dc9f6; display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #4dc9f6;"></span> M1 (実線:実測 / 点線:目標)
+        </span>
+        <span style="color: #fdd663; display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #fdd663;"></span> M2
+        </span>
+        <span style="color: #81c995; display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #81c995;"></span> M3
+        </span>
+        <span style="color: #c58af9; display: flex; align-items: center; gap: 4px;">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #c58af9;"></span> M4
+        </span>
+      `;
+    } else {
+      let html = "";
+      if (scopeState.showTarget) {
+        html += `<span style="color: #4dc9f6; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-target">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #4dc9f6;"></span> 目標値 (Target)
+        </span>`;
+      }
+      if (scopeState.showActual) {
+        html += `<span style="color: #fdd663; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-actual">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #fdd663;"></span> 実測値 (Actual)
+        </span>`;
+      }
+      if (scopeState.showError) {
+        html += `<span style="color: #81c995; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-error">
+          <span style="display: inline-block; width: 14px; height: 3px; background: #81c995;"></span> 偏差 (Error)
+        </span>`;
+      }
+      if (scopeState.showSw && isLine) {
+        html += `<span style="color: #f28b82; display: flex; align-items: center; gap: 4px; cursor: pointer;" id="legend-item-sw">
+          <span style="display: inline-block; width: 12px; height: 1px; border-top: 2px dashed #f28b82;"></span> リミットSW ON
+        </span>`;
+      }
+      scopeLegendBox.innerHTML = html;
+    }
+  }
+
   function updateScopeIndicators(data) {
-    const m = scopeState.selectedMotor;
     const isAngle = scopeState.selectedMetric === "angle";
-    const target = data.targets ? data.targets[m] : 0.0;
-    const actual = isAngle ? (data.angles ? data.angles[m] : 0.0) : (data.speeds ? data.speeds[m] : 0.0);
-    const err = target - actual;
     const unit = isAngle ? "°" : " rps";
 
     const lblTarget = document.getElementById("lbl-scope-target");
     const lblActual = document.getElementById("lbl-scope-actual");
     const lblError = document.getElementById("lbl-scope-error");
 
-    if (lblTarget) lblTarget.textContent = `${target.toFixed(1)}${unit}`;
-    if (lblActual) lblActual.textContent = `${actual.toFixed(1)}${unit}`;
-    if (lblError) lblError.textContent = `${(err > 0 ? "+" : "")}${err.toFixed(1)}${unit}`;
+    if (scopeState.selectedMotor === "all") {
+      const tArr = data.targets || [0, 0, 0, 0];
+      const aArr = isAngle ? (data.angles || [0, 0, 0, 0]) : (data.speeds || [0, 0, 0, 0]);
+      if (lblTarget) lblTarget.textContent = tArr.map((v, i) => `M${i + 1}:${v.toFixed(1)}`).join(" ");
+      if (lblActual) lblActual.textContent = aArr.map((v, i) => `M${i + 1}:${v.toFixed(1)}`).join(" ");
+      if (lblError) {
+        lblError.textContent = tArr.map((v, i) => {
+          const e = v - aArr[i];
+          return `M${i + 1}:${e >= 0 ? "+" : ""}${e.toFixed(1)}`;
+        }).join(" ");
+      }
+    } else {
+      const m = parseInt(scopeState.selectedMotor, 10) || 0;
+      const target = data.targets ? data.targets[m] : 0.0;
+      const actual = isAngle ? (data.angles ? data.angles[m] : 0.0) : (data.speeds ? data.speeds[m] : 0.0);
+      const err = target - actual;
+
+      if (lblTarget) lblTarget.textContent = `${target.toFixed(1)}${unit}`;
+      if (lblActual) lblActual.textContent = `${actual.toFixed(1)}${unit}`;
+      if (lblError) lblError.textContent = `${(err > 0 ? "+" : "")}${err.toFixed(1)}${unit}`;
+    }
 
     if (data.limit_switches) {
       for (let i = 0; i < 4; i++) {
@@ -3955,6 +4038,9 @@ if __name__ == '__main__':
     }
   }
 
+  // モータ別カラーパレット (全モータ表示用)
+  const MOTOR_COLORS = ["#4dc9f6", "#fdd663", "#81c995", "#c58af9"];
+
   // --- Canvas オシロスコープ描画ループ ---
   function renderScopeCanvas() {
     const canvas = document.getElementById("scope-canvas");
@@ -3963,7 +4049,6 @@ if __name__ == '__main__':
       return;
     }
 
-    // 非アクティブビュー時は描画をスキップしてCPUを節約
     const view = document.getElementById("view-telemetry");
     if (!view || !view.classList.contains("active")) {
       requestAnimationFrame(renderScopeCanvas);
@@ -3993,26 +4078,37 @@ if __name__ == '__main__':
     ctx.fillStyle = "#121316";
     ctx.fillRect(0, 0, width, height);
 
-    const mainHeight = height * 0.68;
-    const splitGap = 6;
-    const errTop = mainHeight + splitGap;
-    const errHeight = height - errTop;
-
-    const key = `${scopeState.selectedModule}_${scopeState.selectedMotor}`;
-    const buf = scopeState.buffers.get(key) || [];
     const isAngle = scopeState.selectedMetric === "angle";
 
-    // 上段: 目標値 vs 実測値 ＆ リミットスイッチ縦線
-    drawMainScopeArea(ctx, 0, 0, width, mainHeight, buf, isAngle);
-
-    // 下段: 追従偏差波形
-    drawErrorScopeArea(ctx, 0, errTop, width, errHeight, buf, isAngle);
+    if (scopeState.chartType === "bar") {
+      drawBarChart(ctx, width, height, isAngle);
+    } else {
+      drawLineChart(ctx, width, height, isAngle);
+    }
 
     ctx.restore();
     requestAnimationFrame(renderScopeCanvas);
   }
 
-  function drawMainScopeArea(ctx, left, top, width, height, buf, isAngle) {
+  // --- 折れ線グラフ (Line Chart) 描画 ---
+  function drawLineChart(ctx, width, height, isAngle) {
+    const isAll = scopeState.selectedMotor === "all";
+    const hasErrorArea = scopeState.showError;
+    const mainHeight = hasErrorArea ? height * 0.68 : height;
+    const splitGap = 6;
+    const errTop = mainHeight + splitGap;
+    const errHeight = height - errTop;
+
+    // メイン波形エリア描画
+    drawMainLineArea(ctx, 0, 0, width, mainHeight, isAngle, isAll);
+
+    // 追従偏差波形エリア描画 (追従偏差表示がONの場合のみ)
+    if (hasErrorArea && errHeight > 25) {
+      drawErrorLineArea(ctx, 0, errTop, width, errHeight, isAngle, isAll);
+    }
+  }
+
+  function drawMainLineArea(ctx, left, top, width, height, isAngle, isAll) {
     const padLeft = 45;
     const padRight = 15;
     const padTop = 15;
@@ -4022,17 +4118,27 @@ if __name__ == '__main__':
 
     if (plotW <= 0 || plotH <= 0) return;
 
+    const motors = isAll ? [0, 1, 2, 3] : [parseInt(scopeState.selectedMotor, 10) || 0];
+    const mod = scopeState.selectedModule;
+
     // Y軸レンジの自動算出
     let minVal = -10.0;
     let maxVal = 10.0;
-    if (buf.length > 0) {
-      for (const p of buf) {
-        const t = isAngle ? p.targetAngle : p.targetSpeed;
-        const a = isAngle ? p.angle : p.speed;
-        minVal = Math.min(minVal, t, a);
-        maxVal = Math.max(maxVal, t, a);
+    let hasData = false;
+
+    motors.forEach(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      if (buf.length > 0) {
+        hasData = true;
+        for (const p of buf) {
+          const t = isAngle ? p.targetAngle : p.targetSpeed;
+          const a = isAngle ? p.angle : p.speed;
+          if (scopeState.showTarget) minVal = Math.min(minVal, t), maxVal = Math.max(maxVal, t);
+          if (scopeState.showActual) minVal = Math.min(minVal, a), maxVal = Math.max(maxVal, a);
+        }
       }
-    }
+    });
+
     const margin = Math.max(5.0, (maxVal - minVal) * 0.15);
     minVal -= margin;
     maxVal += margin;
@@ -4058,7 +4164,7 @@ if __name__ == '__main__':
       ctx.fillText(val.toFixed(0), padLeft - 6, y + 3);
     }
 
-    if (buf.length < 2) {
+    if (!hasData) {
       ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
       ctx.font = "12px sans-serif";
       ctx.textAlign = "center";
@@ -4066,77 +4172,103 @@ if __name__ == '__main__':
       return;
     }
 
-    const latestTime = buf[buf.length - 1].time;
-    const startTime = latestTime - scopeState.rangeSeconds;
+    // 基準時刻の取得
+    let latestTime = 0;
+    motors.forEach(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      if (buf.length > 0) latestTime = Math.max(latestTime, buf[buf.length - 1].time);
+    });
+    if (latestTime === 0) return;
 
+    const startTime = latestTime - scopeState.rangeSeconds;
     const timeToX = (t) => padLeft + Math.max(0, Math.min(plotW, ((t - startTime) / scopeState.rangeSeconds) * plotW));
     const valToY = (v) => padTop + plotH - ((v - minVal) / valRange) * plotH;
 
-    // 1. 目標値ライン (水色 #4dc9f6)
-    ctx.strokeStyle = "#4dc9f6";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    let started = false;
-    for (const p of buf) {
-      if (p.time < startTime) continue;
-      const x = timeToX(p.time);
-      const y = valToY(isAngle ? p.targetAngle : p.targetSpeed);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    ctx.stroke();
+    // 各モータの波形描画
+    motors.forEach(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      if (buf.length < 2) return;
 
-    // 2. 実測値ライン (黄色 #fdd663)
-    ctx.strokeStyle = "#fdd663";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    started = false;
-    for (const p of buf) {
-      if (p.time < startTime) continue;
-      const x = timeToX(p.time);
-      const y = valToY(isAngle ? p.angle : p.speed);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-    ctx.stroke();
+      const mColor = isAll ? MOTOR_COLORS[m] : "#fdd663";
+      const targetColor = isAll ? MOTOR_COLORS[m] : "#4dc9f6";
 
-    // 3. リミットスイッチ立ち上がりイベントの縦線マーカー
-    for (const p of buf) {
-      if (p.time < startTime) continue;
-      if (p.swTriggers && p.swTriggers.some(Boolean)) {
-        const x = timeToX(p.time);
-
-        ctx.strokeStyle = "#f28b82";
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
+      // 1. 目標値ライン
+      if (scopeState.showTarget) {
+        ctx.strokeStyle = targetColor;
+        ctx.lineWidth = isAll ? 1.5 : 2;
+        if (isAll) {
+          ctx.setLineDash([4, 4]); // 全モータ時は点線で目標値を区別
+        } else {
+          ctx.setLineDash([]);
+        }
         ctx.beginPath();
-        ctx.moveTo(x, padTop);
-        ctx.lineTo(x, padTop + plotH);
+        let started = false;
+        for (const p of buf) {
+          if (p.time < startTime) continue;
+          const x = timeToX(p.time);
+          const y = valToY(isAngle ? p.targetAngle : p.targetSpeed);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
         ctx.stroke();
         ctx.setLineDash([]);
+      }
 
-        // ラベル印字
-        for (let i = 0; i < 4; i++) {
-          if (p.swTriggers[i]) {
-            ctx.fillStyle = "#f28b82";
-            ctx.font = "bold 9px Consolas, monospace";
-            ctx.textAlign = "center";
-            ctx.fillText(`SW${i + 1} ON`, x, padTop + 10 + i * 11);
+      // 2. 実測値ライン
+      if (scopeState.showActual) {
+        ctx.strokeStyle = mColor;
+        ctx.lineWidth = isAll ? 2 : 2.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        let started = false;
+        for (const p of buf) {
+          if (p.time < startTime) continue;
+          const x = timeToX(p.time);
+          const y = valToY(isAngle ? p.angle : p.speed);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+      }
+
+      // 3. リミットスイッチ縦線イベントマーカー
+      if (scopeState.showSw) {
+        for (const p of buf) {
+          if (p.time < startTime) continue;
+          if (p.swTriggers && p.swTriggers.some(Boolean)) {
+            const x = timeToX(p.time);
+            ctx.strokeStyle = "#f28b82";
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, padTop);
+            ctx.lineTo(x, padTop + plotH);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            for (let i = 0; i < 4; i++) {
+              if (p.swTriggers[i]) {
+                ctx.fillStyle = "#f28b82";
+                ctx.font = "bold 9px Consolas, monospace";
+                ctx.textAlign = "center";
+                ctx.fillText(`SW${i + 1} ON`, x, padTop + 10 + i * 11);
+              }
+            }
           }
         }
       }
-    }
+    });
   }
 
-  function drawErrorScopeArea(ctx, left, top, width, height, buf, isAngle) {
+  function drawErrorLineArea(ctx, left, top, width, height, isAngle, isAll) {
     const padLeft = 45;
     const padRight = 15;
     const padTop = 10;
@@ -4146,14 +4278,23 @@ if __name__ == '__main__':
 
     if (plotW <= 0 || plotH <= 0) return;
 
+    const motors = isAll ? [0, 1, 2, 3] : [parseInt(scopeState.selectedMotor, 10) || 0];
+    const mod = scopeState.selectedModule;
+
     // 偏差レンジの算出 (0を中心に上下対称)
     let maxAbsErr = 5.0;
-    if (buf.length > 0) {
-      for (const p of buf) {
-        const e = Math.abs(isAngle ? p.errorAngle : p.errorSpeed);
-        maxAbsErr = Math.max(maxAbsErr, e);
+    let hasData = false;
+
+    motors.forEach(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      if (buf.length > 0) {
+        hasData = true;
+        for (const p of buf) {
+          const e = Math.abs(isAngle ? p.errorAngle : p.errorSpeed);
+          maxAbsErr = Math.max(maxAbsErr, e);
+        }
       }
-    }
+    });
     maxAbsErr = Math.ceil(maxAbsErr * 1.2);
 
     const valToY = (err) => padTop + plotH / 2 - (err / maxAbsErr) * (plotH / 2);
@@ -4176,29 +4317,164 @@ if __name__ == '__main__':
     ctx.fillText("0", padLeft - 6, zeroY + 3);
     ctx.fillText(`-${maxAbsErr}`, padLeft - 6, padTop + plotH);
 
-    if (buf.length < 2) return;
+    if (!hasData) return;
 
-    const latestTime = buf[buf.length - 1].time;
+    let latestTime = 0;
+    motors.forEach(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      if (buf.length > 0) latestTime = Math.max(latestTime, buf[buf.length - 1].time);
+    });
+    if (latestTime === 0) return;
+
     const startTime = latestTime - scopeState.rangeSeconds;
     const timeToX = (t) => padLeft + Math.max(0, Math.min(plotW, ((t - startTime) / scopeState.rangeSeconds) * plotW));
 
-    // 偏差ライン (緑色 #81c995)
-    ctx.strokeStyle = "#81c995";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    let started = false;
-    for (const p of buf) {
-      if (p.time < startTime) continue;
-      const x = timeToX(p.time);
-      const y = valToY(isAngle ? p.errorAngle : p.errorSpeed);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else {
-        ctx.lineTo(x, y);
+    // 各モータの偏差ライン描画
+    motors.forEach(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      if (buf.length < 2) return;
+
+      const errColor = isAll ? MOTOR_COLORS[m] : "#81c995";
+      ctx.strokeStyle = errColor;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      let started = false;
+      for (const p of buf) {
+        if (p.time < startTime) continue;
+        const x = timeToX(p.time);
+        const y = valToY(isAngle ? p.errorAngle : p.errorSpeed);
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
       }
+      ctx.stroke();
+    });
+  }
+
+  // --- 棒グラフ (Bar Chart) リアルタイム描画 ---
+  function drawBarChart(ctx, width, height, isAngle) {
+    const padLeft = 55;
+    const padRight = 25;
+    const padTop = 35;
+    const padBottom = 45;
+    const plotW = width - padLeft - padRight;
+    const plotH = height - padTop - padBottom;
+
+    if (plotW <= 0 || plotH <= 0) return;
+
+    const isAll = scopeState.selectedMotor === "all";
+    const motors = isAll ? [0, 1, 2, 3] : [parseInt(scopeState.selectedMotor, 10) || 0];
+    const mod = scopeState.selectedModule;
+
+    // 表示する系列の判定
+    const activeSeries = [];
+    if (scopeState.showTarget) activeSeries.push({ key: "target", color: "#4dc9f6", label: "目標" });
+    if (scopeState.showActual) activeSeries.push({ key: "actual", color: "#fdd663", label: "実測" });
+    if (scopeState.showError) activeSeries.push({ key: "error", color: "#81c995", label: "偏差" });
+
+    // 各モータの最新サンプル値を取得
+    const motorData = motors.map(m => {
+      const buf = scopeState.buffers.get(`${mod}_${m}`) || [];
+      const last = buf.length > 0 ? buf[buf.length - 1] : null;
+      const target = last ? (isAngle ? last.targetAngle : last.targetSpeed) : 0.0;
+      const actual = last ? (isAngle ? last.angle : last.speed) : 0.0;
+      const error = last ? (isAngle ? last.errorAngle : last.errorSpeed) : 0.0;
+      const limitSw = last ? last.limitSw : [false, false, false, false];
+      return { motor: m, target, actual, error, limitSw };
+    });
+
+    // 最大絶対値スケールの算出 (0を中心に上下対称)
+    let maxAbsVal = 5.0;
+    motorData.forEach(d => {
+      if (scopeState.showTarget) maxAbsVal = Math.max(maxAbsVal, Math.abs(d.target));
+      if (scopeState.showActual) maxAbsVal = Math.max(maxAbsVal, Math.abs(d.actual));
+      if (scopeState.showError) maxAbsVal = Math.max(maxAbsVal, Math.abs(d.error));
+    });
+    maxAbsVal = Math.max(5.0, Math.ceil(maxAbsVal * 1.2));
+
+    const zeroY = padTop + plotH / 2;
+    const valToY = (v) => zeroY - (v / maxAbsVal) * (plotH / 2);
+
+    // 水平グリッド線と目盛り数値
+    const gridSteps = [-maxAbsVal, -maxAbsVal / 2, 0, maxAbsVal / 2, maxAbsVal];
+    gridSteps.forEach(val => {
+      const y = valToY(val);
+      ctx.strokeStyle = val === 0 ? "rgba(255, 255, 255, 0.3)" : "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = val === 0 ? 1.5 : 1;
+      ctx.setLineDash(val === 0 ? [] : [2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(padLeft + plotW, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.font = "10px Consolas, monospace";
+      ctx.textAlign = "right";
+      const sign = val > 0 ? "+" : "";
+      ctx.fillText(`${sign}${val.toFixed(0)}`, padLeft - 8, y + 3);
+    });
+
+    if (activeSeries.length === 0) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.font = "13px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("上部のチェックボックスで表示系列を選択してください", padLeft + plotW / 2, padTop + plotH / 2);
+      return;
     }
-    ctx.stroke();
+
+    // 各モータグループのバー描画
+    const groupW = plotW / motors.length;
+    const seriesCount = activeSeries.length;
+    const barW = Math.min(36, Math.max(12, (groupW * 0.7) / seriesCount));
+    const gap = 4;
+    const totalBarsW = seriesCount * barW + (seriesCount - 1) * gap;
+
+    motorData.forEach((d, groupIdx) => {
+      const groupCenterX = padLeft + groupIdx * groupW + groupW / 2;
+      const startX = groupCenterX - totalBarsW / 2;
+
+      // モータ名ラベル印字
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 13px 'Segoe UI', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(`M${d.motor + 1}`, groupCenterX, padTop + plotH + 20);
+
+      // リミットスイッチ状態表示 (該当モータのスイッチがONの場合)
+      if (d.limitSw && d.limitSw[d.motor]) {
+        ctx.fillStyle = "#f28b82";
+        ctx.font = "bold 10px Consolas, monospace";
+        ctx.fillText("● SW ON", groupCenterX, padTop + plotH + 34);
+      }
+
+      // 各系列のバーを描画
+      activeSeries.forEach((s, sIdx) => {
+        const val = d[s.key];
+        const barX = startX + sIdx * (barW + gap);
+        const barY = valToY(Math.max(0, val));
+        const barH = Math.max(2, Math.abs((val / maxAbsVal) * (plotH / 2)));
+        const renderY = val >= 0 ? zeroY - barH : zeroY;
+
+        ctx.fillStyle = s.color;
+        ctx.fillRect(barX, renderY, barW, barH);
+
+        // バーの輪郭線
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX, renderY, barW, barH);
+
+        // バー先端の数値印字
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "9px Consolas, monospace";
+        ctx.textAlign = "center";
+        const textY = val >= 0 ? renderY - 4 : renderY + barH + 11;
+        const sign = val > 0 ? "+" : "";
+        ctx.fillText(`${sign}${val.toFixed(1)}`, barX + barW / 2, textY);
+      });
+    });
   }
 
   // --- スコープのイベントリスナー ---
@@ -4207,21 +4483,68 @@ if __name__ == '__main__':
       scopeState.selectedModule = e.target.value;
     });
   }
+
   if (selScopeMotor) {
     selScopeMotor.addEventListener("change", (e) => {
-      scopeState.selectedMotor = parseInt(e.target.value, 10) || 0;
+      scopeState.selectedMotor = e.target.value;
+      updateScopeLegend();
     });
   }
+
+  if (selScopeChartType) {
+    selScopeChartType.addEventListener("change", (e) => {
+      scopeState.chartType = e.target.value;
+      if (groupScopeRange) {
+        groupScopeRange.style.display = scopeState.chartType === "bar" ? "none" : "flex";
+      }
+      updateScopeLegend();
+    });
+  }
+
   if (selScopeMetric) {
     selScopeMetric.addEventListener("change", (e) => {
       scopeState.selectedMetric = e.target.value;
     });
   }
+
   if (selScopeRange) {
     selScopeRange.addEventListener("change", (e) => {
       scopeState.rangeSeconds = parseInt(e.target.value, 10) || 5;
     });
   }
+
+  if (chkScopeShowTarget) {
+    chkScopeShowTarget.addEventListener("change", (e) => {
+      scopeState.showTarget = e.target.checked;
+      updateScopeStatCardsVisibility();
+      updateScopeLegend();
+    });
+  }
+
+  if (chkScopeShowActual) {
+    chkScopeShowActual.addEventListener("change", (e) => {
+      scopeState.showActual = e.target.checked;
+      updateScopeStatCardsVisibility();
+      updateScopeLegend();
+    });
+  }
+
+  if (chkScopeShowError) {
+    chkScopeShowError.addEventListener("change", (e) => {
+      scopeState.showError = e.target.checked;
+      updateScopeStatCardsVisibility();
+      updateScopeLegend();
+    });
+  }
+
+  if (chkScopeShowSw) {
+    chkScopeShowSw.addEventListener("change", (e) => {
+      scopeState.showSw = e.target.checked;
+      updateScopeStatCardsVisibility();
+      updateScopeLegend();
+    });
+  }
+
   if (btnScopePause) {
     btnScopePause.addEventListener("click", () => {
       scopeState.isPaused = !scopeState.isPaused;
@@ -4237,37 +4560,76 @@ if __name__ == '__main__':
 
   if (btnScopeExportCsv) {
     btnScopeExportCsv.addEventListener("click", () => {
-      const key = `${scopeState.selectedModule}_${scopeState.selectedMotor}`;
-      const buf = scopeState.buffers.get(key) || [];
-      if (buf.length === 0) {
-        alert("エクスポート可能な波形データがありません。");
-        return;
-      }
-
       const isAngle = scopeState.selectedMetric === "angle";
-      let csv = "time,target,actual,error,sw1,sw2,sw3,sw4\n";
-      for (const p of buf) {
-        const t = isAngle ? p.targetAngle : p.targetSpeed;
-        const a = isAngle ? p.angle : p.speed;
-        const e = isAngle ? p.errorAngle : p.errorSpeed;
-        const sw = p.limitSw || [false, false, false, false];
-        csv += `${p.time.toFixed(4)},${t.toFixed(2)},${a.toFixed(2)},${e.toFixed(2)},${sw[0] ? 1 : 0},${sw[1] ? 1 : 0},${sw[2] ? 1 : 0},${sw[3] ? 1 : 0}\n`;
-      }
+      const isAll = scopeState.selectedMotor === "all";
+      const mod = scopeState.selectedModule;
 
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `telemetry_${scopeState.selectedModule}_M${scopeState.selectedMotor + 1}_${Date.now()}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      if (isAll) {
+        // 全モータまとめてCSV出力
+        const b0 = scopeState.buffers.get(`${mod}_0`) || [];
+        if (b0.length === 0) {
+          alert("エクスポート可能な波形データがありません。");
+          return;
+        }
+        let csv = "time,m1_target,m1_actual,m1_err,m2_target,m2_actual,m2_err,m3_target,m3_actual,m3_err,m4_target,m4_actual,m4_err\n";
+        for (let i = 0; i < b0.length; i++) {
+          const rowTime = b0[i].time.toFixed(4);
+          const vals = [];
+          for (let m = 0; m < 4; m++) {
+            const b = scopeState.buffers.get(`${mod}_${m}`) || [];
+            const p = b[i] || b[b.length - 1] || {};
+            const t = isAngle ? (p.targetAngle || 0) : (p.targetSpeed || 0);
+            const a = isAngle ? (p.angle || 0) : (p.speed || 0);
+            const e = isAngle ? (p.errorAngle || 0) : (p.errorSpeed || 0);
+            vals.push(`${t.toFixed(2)},${a.toFixed(2)},${e.toFixed(2)}`);
+          }
+          csv += `${rowTime},${vals.join(",")}\n`;
+        }
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `telemetry_${mod}_AllMotors_${Date.now()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        const m = parseInt(scopeState.selectedMotor, 10) || 0;
+        const key = `${mod}_${m}`;
+        const buf = scopeState.buffers.get(key) || [];
+        if (buf.length === 0) {
+          alert("エクスポート可能な波形データがありません。");
+          return;
+        }
+
+        let csv = "time,target,actual,error,sw1,sw2,sw3,sw4\n";
+        for (const p of buf) {
+          const t = isAngle ? p.targetAngle : p.targetSpeed;
+          const a = isAngle ? p.angle : p.speed;
+          const e = isAngle ? p.errorAngle : p.errorSpeed;
+          const sw = p.limitSw || [false, false, false, false];
+          csv += `${p.time.toFixed(4)},${t.toFixed(2)},${a.toFixed(2)},${e.toFixed(2)},${sw[0] ? 1 : 0},${sw[1] ? 1 : 0},${sw[2] ? 1 : 0},${sw[3] ? 1 : 0}\n`;
+        }
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `telemetry_${mod}_M${m + 1}_${Date.now()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
     });
   }
 
-  // 初期選択肢の構築
+  // 初期化
   updateScopeModuleSelect();
+  updateScopeLegend();
+  updateScopeStatCardsVisibility();
 
   // 描画ループ起動
   requestAnimationFrame(renderScopeCanvas);
