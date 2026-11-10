@@ -6,6 +6,12 @@ use tokio::sync::broadcast;
 
 use crate::types::{CanFrameEvent, CanStatusEvent, WsEvent};
 
+#[cfg(target_os = "windows")]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+}
+
 struct UsbInner {
     active_port: String,
     is_connected: bool,
@@ -144,6 +150,11 @@ impl UsbCanBridge {
         let rx_tx = self.rx_tx.clone();
 
         std::thread::spawn(move || {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                timeBeginPeriod(1);
+            }
+
             let mut port_opt: Option<Box<dyn serialport::SerialPort>> = None;
             let mut rx_line_buf = String::new();
 
@@ -234,6 +245,7 @@ impl UsbCanBridge {
                                 io_err = Some(format!("slcan送信エラー: {}", e));
                                 break;
                             } else {
+                                let _ = p.flush();
                                 let _ = rx_tx.send(CanFrameEvent {
                                     direction: "TX".to_string(),
                                     channel: "usb".to_string(),

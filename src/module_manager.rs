@@ -7,6 +7,12 @@ use tokio::sync::broadcast;
 
 use crate::types::{CanFrameEvent, MddFeedbackData, ModulesConfigFile, MotorParam, WsEvent};
 
+#[cfg(target_os = "windows")]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+}
+
 fn encode_int16_le(val: f64) -> [u8; 2] {
     let clamped = val.round().clamp(-32768.0, 32767.0) as i16;
     clamped.to_le_bytes()
@@ -151,11 +157,35 @@ impl ModuleManager {
         for i in 0..4 {
             arr[i] = targets.get(i).copied().unwrap_or(0.0);
         }
-        self.inner
-            .lock()
-            .unwrap()
-            .mdd_targets
-            .insert(name.to_string(), arr);
+
+        let frame_opt = {
+            let mut g = self.inner.lock().unwrap();
+            g.mdd_targets.insert(name.to_string(), arr);
+
+            if g.is_running && !g.is_sending_params {
+                if let Some(m) = g.config.modules.iter().find(|m| m.name == name && m.module_type == "mdd") {
+                    if let Some(base_id) = parse_hex_id(&m.base_id) {
+                        let mut payload = Vec::with_capacity(8);
+                        for t in arr {
+                            let scaled = (t * 10.0).trunc();
+                            payload.extend_from_slice(&encode_int16_le(scaled));
+                        }
+                        Some((base_id + 0x20, payload))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // コマンド受信時に即時CAN送信を行うことで、定期ループ（10ms）待ちの遅延を完全に排除
+        if let Some((can_id, payload)) = frame_opt {
+            (self.send_can_fn)(can_id, &payload, "can1");
+        }
     }
 
     pub fn set_servo_command(&self, name: &str, angles: &[f64]) {
@@ -635,8 +665,14 @@ impl ModuleManager {
         let inner = self.inner.clone();
         let send_can_fn = self.send_can_fn.clone();
 
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(10));
+        std::thread::spawn(move || {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                timeBeginPeriod(1);
+            }
+
+            loop {
+                std::thread::sleep(Duration::from_millis(10));
 
             let frames_to_send = {
                 let g = inner.lock().unwrap();
@@ -693,6 +729,7 @@ impl ModuleManager {
 
             for (id, payload) in frames_to_send {
                 (send_can_fn)(id, &payload, "can1");
+            }
             }
         });
     }

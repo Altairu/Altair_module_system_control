@@ -908,12 +908,14 @@ async fn api_open_url(Json(req): Json<OpenUrlReq>) -> impl IntoResponse {
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    Query(params): Query<HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws_client(socket, state))
+    let filter = params.get("filter").cloned().unwrap_or_default();
+    ws.on_upgrade(move |socket| handle_ws_client(socket, state, filter))
 }
 
-async fn handle_ws_client(socket: WebSocket, state: AppState) {
+async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.ws_tx.subscribe();
 
@@ -936,7 +938,15 @@ async fn handle_ws_client(socket: WebSocket, state: AppState) {
     }
 
     let send_task = tokio::spawn(async move {
+        let is_behavior = filter == "behavior";
         while let Ok(ev) = rx.recv().await {
+            // Python Behavior クライアントへは大量の raw_can_frame ログを送信せず帯域・CPUを節約
+            if is_behavior {
+                match &ev {
+                    WsEvent::RawCanFrame { .. } => continue,
+                    _ => {}
+                }
+            }
             if let Ok(txt) = serde_json::to_string(&ev) {
                 if sender.send(Message::Text(txt)).await.is_err() {
                     break;

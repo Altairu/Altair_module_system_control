@@ -3,10 +3,19 @@ import json
 import os
 import socket
 import struct
+import sys
 import threading
 import time
 from urllib.parse import urlparse
 import rclpy
+
+# Windows環境下でのスリープおよびタイマー分解能を1msに高精度化
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.winmm.timeBeginPeriod(1)
+    except Exception:
+        pass
 
 
 class _SimpleWsClient:
@@ -40,6 +49,8 @@ class _SimpleWsClient:
         host = parsed.hostname or "127.0.0.1"
         port = parsed.port or 8000
         path = parsed.path or "/ws"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
 
         s = socket.create_connection((host, port), timeout=2.0)
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -90,6 +101,9 @@ class _SimpleWsClient:
                         )
 
                     if opcode == 0x1:  # Text frame
+                        # Python Behaviorでは不要な raw_can_frame ログを早期破棄してパース負荷と遅延を排除
+                        if b'"raw_can_frame"' in payload:
+                            continue
                         text = payload.decode("utf-8", errors="ignore")
                         if self.on_message:
                             self.on_message(text)
@@ -214,20 +228,30 @@ class MddClient:
         self.name = name
         self.latest_feedback = MddFeedback()
         self._last_send_time = 0.0
+        self._last_targets = None
 
     def set_targets(self, targets):
         now = time.monotonic()
-        # Blockly の while True ループ内に sleep が無い場合でもCPU100%や通信飽和を防ぐ
-        if now - self._last_send_time < 0.002:
-            time.sleep(0.002)
+        float_targets = [float(t) for t in targets]
+
+        # 入力値に変化がない場合、直近50ms以内の同一送信を間引いてTCPキュー滞留を防止
+        if self._last_targets == float_targets and (now - self._last_send_time < 0.05):
+            return
+
+        # 100Hz (10ms) 以上の過剰なバースト送信を抑制
+        elapsed = now - self._last_send_time
+        if elapsed < 0.008:
+            time.sleep(0.008 - elapsed)
             now = time.monotonic()
+
         self._last_send_time = now
+        self._last_targets = float_targets
 
         self.behavior._ws.send_json(
             {
                 "type": "mdd_cmd",
                 "name": self.name,
-                "targets": [float(t) for t in targets]
+                "targets": float_targets
             }
         )
 
@@ -308,7 +332,7 @@ class AltairBehavior:
         self.config = self._load_config()
         self.gamepad = GamepadState()
 
-        ws_url = os.getenv("ALTAIR_WS_URL", "ws://127.0.0.1:8000/ws")
+        ws_url = os.getenv("ALTAIR_WS_URL", "ws://127.0.0.1:8000/ws?filter=behavior")
         self._ws = _SimpleWsClient(ws_url, self._on_ws_message)
 
         # WebSocket接続完了を少し待つ (最大0.3秒)

@@ -1,10 +1,16 @@
 use gilrs::{Axis, Button, Event, EventType, Gilrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use crate::types::WsEvent;
+
+#[cfg(target_os = "windows")]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+}
 
 /// バックグラウンドでネイティブゲームパッド (XInput / DirectInput) を監視・配信するサービス
 pub struct GamepadService {
@@ -27,6 +33,11 @@ impl GamepadService {
         let is_running = self.is_running.clone();
 
         std::thread::spawn(move || {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                timeBeginPeriod(1);
+            }
+
             let mut gilrs = match Gilrs::new() {
                 Ok(g) => g,
                 Err(e) => {
@@ -37,6 +48,9 @@ impl GamepadService {
             };
 
             let mut last_connected_id = None;
+            let mut last_axes: Vec<f64> = Vec::new();
+            let mut last_buttons: Vec<bool> = Vec::new();
+            let mut last_sent_time = Instant::now() - Duration::from_secs(1);
 
             while is_running.load(Ordering::Relaxed) {
                 // 1. 新しいイベント（接続、切断、ボタンなど）を処理
@@ -110,12 +124,22 @@ impl GamepadService {
                     buttons[14] = gp.is_pressed(Button::DPadLeft);
                     buttons[15] = gp.is_pressed(Button::DPadRight);
 
-                    // WebSocket 経由で Python Behavior および WebUI モニターへ 50Hz で直接ブロードキャスト
-                    let _ = ws_tx.send(WsEvent::GamepadInput { buttons, axes });
+                    // 入力値に変化があった場合、または20Hz(50ms)キープアライブ時に送信
+                    let changed = axes != last_axes || buttons != last_buttons;
+                    let keepalive = last_sent_time.elapsed() >= Duration::from_millis(50);
+
+                    if changed || keepalive {
+                        last_axes = axes.clone();
+                        last_buttons = buttons.clone();
+                        last_sent_time = Instant::now();
+
+                        // WebSocket 経由で Python Behavior および WebUI モニターへ最大100Hzで直接ブロードキャスト
+                        let _ = ws_tx.send(WsEvent::GamepadInput { buttons, axes });
+                    }
                 }
 
-                // 20ms待機 (50Hz周期)
-                std::thread::sleep(Duration::from_millis(20));
+                // 10ms待機 (100Hzポーリング) でスティック入力変化を低遅延検出
+                std::thread::sleep(Duration::from_millis(10));
             }
         });
     }

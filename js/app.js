@@ -3056,6 +3056,27 @@ document.addEventListener("DOMContentLoaded", () => {
     return [code, getAtomicOrder()];
   });
 
+  registerGenerator('controls_whileUntil', function (block, generator) {
+    const gen = generator || pyGen;
+    const until = block.getFieldValue('MODE') === 'UNTIL';
+    let argument0 = gen.valueToCode(block, 'BOOL', getAtomicOrder()) || 'False';
+    let branch = gen.statementToCode(block, 'DO');
+    if (until) {
+      argument0 = 'not ' + argument0;
+    }
+    // ループ内に明示的なスリープがない場合でも、ビジーループによるGILロックとCPU高負荷を防ぐため 10ms (100Hz) スリープを自動挿入
+    const indent = gen.INDENT || '    ';
+    return `while ${argument0}:\n${branch}${indent}time.sleep(0.01)\n`;
+  });
+
+  registerGenerator('controls_repeat_ext', function (block, generator) {
+    const gen = generator || pyGen;
+    const repeats = gen.valueToCode(block, 'TIMES', getAtomicOrder()) || '0';
+    let branch = gen.statementToCode(block, 'DO');
+    const indent = gen.INDENT || '    ';
+    return `for _count in range(int(${repeats})):\n${branch}${indent}time.sleep(0.01)\n`;
+  });
+
   registerGenerator('robot_kinematics', function (block, generator) {
     const root = block.getRootBlock();
     if (!root || root.type !== 'event_macro') return '';
@@ -3081,82 +3102,59 @@ document.addEventListener("DOMContentLoaded", () => {
     const omega = gen.valueToCode(block, 'OMEGA', order) || '0.0';
 
     return `
-# 運動学計算実行
-def _calc_kinematics():
-    import math
-    vx_val = float(${vx}) / 1000.0
-    vy_val = float(${vy}) / 1000.0
-    omega_val = float(${omega})
-    
-    r_t = ${tread} / 2000.0
-    
-    def get_dia(m_name):
-        if m_name == 'none': return 100.0
-        for m in self.config.get('modules', []):
-            if m.get('name') == "${mddName}":
-                return m.get('parameters', {}).get(m_name, {}).get('diameter', 100.0)
-        return 100.0
-        
-    dia_lf = get_dia("${mLf}")
-    dia_rf = get_dia("${mRf}")
-    dia_lr = get_dia("${mLr}")
-    dia_rr = get_dia("${mRr}")
-    
-    k_lf = 1000.0 / (math.pi * dia_lf) if dia_lf > 0 else 1.0
-    k_rf = 1000.0 / (math.pi * dia_rf) if dia_rf > 0 else 1.0
-    k_lr = 1000.0 / (math.pi * dia_lr) if dia_lr > 0 else 1.0
-    k_rr = 1000.0 / (math.pi * dia_rr) if dia_rr > 0 else 1.0
-    
-    target_speeds = [0.0, 0.0, 0.0, 0.0]
-    
-    if "${type}" == "3_OMNI":
-        v1 = (vy_val + r_t * omega_val) * ${invLf}
-        v2 = (-0.866025 * vx_val - 0.5 * vy_val + r_t * omega_val) * ${invRf}
-        v3 = (0.866025 * vx_val - 0.5 * vy_val + r_t * omega_val) * ${invLr}
-        
-        for slot, val in [("${mLf}", v1 * k_lf), ("${mRf}", v2 * k_rf), ("${mLr}", v3 * k_lr)]:
-            if slot != 'none':
-                idx = int(slot[1]) - 1
-                target_speeds[idx] = val
-                
-    elif "${type}" == "4_OMNI":
-        v_lf = (-0.707107 * vx_val + 0.707107 * vy_val - r_t * omega_val) * ${invLf}
-        v_rf = (0.707107 * vx_val + 0.707107 * vy_val + r_t * omega_val) * ${invRf}
-        v_lr = (-0.707107 * vx_val - 0.707107 * vy_val + r_t * omega_val) * ${invLr}
-        v_rr = (0.707107 * vx_val - 0.707107 * vy_val - r_t * omega_val) * ${invRr}
-        
-        for slot, val in [("${mLf}", v_lf * k_lf), ("${mRf}", v_rf * k_rf), ("${mLr}", v_lr * k_lr), ("${mRr}", v_rr * k_rr)]:
-            if slot != 'none':
-                idx = int(slot[1]) - 1
-                target_speeds[idx] = val
-                
-    elif "${type}" == "4_MECANUM":
-        v_lf = (vy_val - vx_val - r_t * omega_val) * ${invLf}
-        v_rf = (vy_val + vx_val + r_t * omega_val) * ${invRf}
-        v_lr = (vy_val + vx_val - r_t * omega_val) * ${invLr}
-        v_rr = (vy_val - vx_val + r_t * omega_val) * ${invRr}
-        
-        for slot, val in [("${mLf}", v_lf * k_lf), ("${mRf}", v_rf * k_rf), ("${mLr}", v_lr * k_lr), ("${mRr}", v_rr * k_rr)]:
-            if slot != 'none':
-                idx = int(slot[1]) - 1
-                target_speeds[idx] = val
-                
-    elif "${type}" == "2_DIFF":
-        v_l = vy_val - r_t * omega_val
-        v_r = vy_val + r_t * omega_val
-        
-        for slot, val in [("${mLf}", v_l * k_lf * ${invLf}), ("${mLr}", v_l * k_lr * ${invLr})]:
-            if slot != 'none':
-                idx = int(slot[1]) - 1
-                target_speeds[idx] = val
-        for slot, val in [("${mRf}", v_r * k_rf * ${invRf}), ("${mRr}", v_r * k_rr * ${invRr})]:
-            if slot != 'none':
-                idx = int(slot[1]) - 1
-                target_speeds[idx] = val
-                
-    self.get_module("${mddName}").set_targets(target_speeds)
+# ロボット運動学計算と目標速度送信
+_vx_val = float(${vx}) / 1000.0
+_vy_val = float(${vy}) / 1000.0
+_omega_val = float(${omega})
+_r_t = ${tread} / 2000.0
 
-_calc_kinematics()
+def _get_dia(m_slot):
+    if m_slot == 'none': return 100.0
+    for _m in self.config.get('modules', []):
+        if _m.get('name') == "${mddName}":
+            return _m.get('parameters', {}).get(m_slot, {}).get('diameter', 100.0)
+    return 100.0
+
+_k_lf = 1000.0 / (3.141592653589793 * _get_dia("${mLf}"))
+_k_rf = 1000.0 / (3.141592653589793 * _get_dia("${mRf}"))
+_k_lr = 1000.0 / (3.141592653589793 * _get_dia("${mLr}"))
+_k_rr = 1000.0 / (3.141592653589793 * _get_dia("${mRr}"))
+
+_target_speeds = [0.0, 0.0, 0.0, 0.0]
+if "${type}" == "3_OMNI":
+    _v1 = (_vy_val + _r_t * _omega_val) * ${invLf}
+    _v2 = (-0.866025 * _vx_val - 0.5 * _vy_val + _r_t * _omega_val) * ${invRf}
+    _v3 = (0.866025 * _vx_val - 0.5 * _vy_val + _r_t * _omega_val) * ${invLr}
+    for _slot, _val in [("${mLf}", _v1 * _k_lf), ("${mRf}", _v2 * _k_rf), ("${mLr}", _v3 * _k_lr)]:
+        if _slot != 'none':
+            _target_speeds[int(_slot[1]) - 1] = _val
+elif "${type}" == "4_OMNI":
+    _v_lf = (-0.707107 * _vx_val + 0.707107 * _vy_val - _r_t * _omega_val) * ${invLf}
+    _v_rf = (0.707107 * _vx_val + 0.707107 * _vy_val + _r_t * _omega_val) * ${invRf}
+    _v_lr = (-0.707107 * _vx_val - 0.707107 * _vy_val + _r_t * _omega_val) * ${invLr}
+    _v_rr = (0.707107 * _vx_val - 0.707107 * _vy_val - _r_t * _omega_val) * ${invRr}
+    for _slot, _val in [("${mLf}", _v_lf * _k_lf), ("${mRf}", _v_rf * _k_rf), ("${mLr}", _v_lr * _k_lr), ("${mRr}", _v_rr * _k_rr)]:
+        if _slot != 'none':
+            _target_speeds[int(_slot[1]) - 1] = _val
+elif "${type}" == "4_MECANUM":
+    _v_lf = (_vy_val - _vx_val - _r_t * _omega_val) * ${invLf}
+    _v_rf = (_vy_val + _vx_val + _r_t * _omega_val) * ${invRf}
+    _v_lr = (_vy_val + _vx_val - _r_t * _omega_val) * ${invLr}
+    _v_rr = (_vy_val - _vx_val + _r_t * _omega_val) * ${invRr}
+    for _slot, _val in [("${mLf}", _v_lf * _k_lf), ("${mRf}", _v_rf * _k_rf), ("${mLr}", _v_lr * _k_lr), ("${mRr}", _v_rr * _k_rr)]:
+        if _slot != 'none':
+            _target_speeds[int(_slot[1]) - 1] = _val
+elif "${type}" == "2_DIFF":
+    _v_l = _vy_val - _r_t * _omega_val
+    _v_r = _vy_val + _r_t * _omega_val
+    for _slot, _val in [("${mLf}", _v_l * _k_lf * ${invLf}), ("${mLr}", _v_l * _k_lr * ${invLr})]:
+        if _slot != 'none':
+            _target_speeds[int(_slot[1]) - 1] = _val
+    for _slot, _val in [("${mRf}", _v_r * _k_rf * ${invRf}), ("${mRr}", _v_r * _k_rr * ${invRr})]:
+        if _slot != 'none':
+            _target_speeds[int(_slot[1]) - 1] = _val
+
+self.get_module("${mddName}").set_targets(_target_speeds)
 `;
   });
 
@@ -3182,6 +3180,7 @@ import sys
 import rclpy
 import os
 import time
+import math
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from altair_core.base_behavior import AltairBehavior

@@ -145,7 +145,7 @@ document.addEventListener("DOMContentLoaded", () => {
         `let timer = null;
         self.onmessage = function(e) {
           if (e.data === 'start') {
-            if (!timer) timer = setInterval(() => self.postMessage('tick'), 25);
+            if (!timer) timer = setInterval(() => self.postMessage('tick'), 10);
           } else if (e.data === 'stop') {
             if (timer) { clearInterval(timer); timer = null; }
           }
@@ -179,7 +179,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (workerTimer) {
       workerTimer.postMessage('start');
     } else {
-      state.intervalId = setInterval(pollAndSendGamepad, 25);
+      state.intervalId = setInterval(pollAndSendGamepad, 10);
     }
   }
 
