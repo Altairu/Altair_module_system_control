@@ -275,6 +275,15 @@ impl BehaviorRunner {
     pub fn stop_behavior(&self) -> String {
         let mut g = self.inner.lock().unwrap();
         if let Some(mut child) = g.child.take() {
+            let pid = child.id();
+            #[cfg(target_os = "windows")]
+            {
+                // Windows では taskkill /F /T /PID で子プロセスツリーごと確実に強制終了
+                let mut kill_cmd = Command::new("taskkill");
+                kill_cmd.arg("/F").arg("/T").arg("/PID").arg(pid.to_string());
+                kill_cmd.creation_flags(CREATE_NO_WINDOW);
+                let _ = kill_cmd.output();
+            }
             let _ = child.kill();
             let _ = child.wait();
             g.active_script.clear();

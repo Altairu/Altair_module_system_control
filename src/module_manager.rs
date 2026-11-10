@@ -524,8 +524,19 @@ impl ModuleManager {
                 .collect::<Vec<_>>()
         };
 
+        // パラメータ送信完了時は、全モータ目標値を安全なゼロに初期化
+        {
+            let mut g = self.inner.lock().unwrap();
+            let mods = g.config.modules.clone();
+            for m in &mods {
+                if m.module_type == "mdd" {
+                    g.mdd_targets.insert(m.name.clone(), [0.0; 4]);
+                }
+            }
+        }
+
         Ok(format!(
-            "全マイコン ({}) からの設定完了応答を確認し、制御実行状態になりました。",
+            "全マイコン ({}) へのパラメータ一括送信が完了しました (Ready)。",
             confirmed_names.join(", ")
         ))
     }

@@ -1755,14 +1755,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // パラメータ送信 ＆ 全マイコン応答待機 ＆ 制御開始
+  // パラメータ一括送信（Send Params）
   el.btnSendParams.addEventListener("click", async () => {
     state.isSendingParams = true;
     state.controlMode = "SENDING";
     if (el.lblControlModeStatus) {
       el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ送信・応答待機中...</span>';
     }
-    appendTerminalLog(el.behaviorTerminal, "制御パラメータを送信し、全マイコンからの設定完了応答を待機しています...");
+    appendTerminalLog(el.behaviorTerminal, "制御パラメータを一括送信中 (マイコンの設定完了応答を待機)...");
     try {
       const res = await fetch("/api/start_control", { method: "POST" });
       const data = await res.json();
@@ -1774,13 +1774,13 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${data.message}`, "system-msg");
         if (el.lblControlModeStatus) {
-          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">制御実行中 (Control Mode)</span>';
+          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-success">パラメータ設定完了 (Ready)</span>';
         }
         state.controlMode = "CONTROL";
       } else {
         state.controlMode = "SETUP";
         if (el.lblControlModeStatus) {
-          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';
+          el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (Setup Mode)</span>';
         }
         appendTerminalLog(el.behaviorTerminal, `[ERROR] 送信失敗: ${data.message}`, "error-msg");
       }
@@ -1788,7 +1788,7 @@ document.addEventListener("DOMContentLoaded", () => {
       state.isSendingParams = false;
       state.controlMode = "SETUP";
       if (el.lblControlModeStatus) {
-        el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (待機中)</span>';
+        el.lblControlModeStatus.innerHTML = 'ステータス: <span class="badge badge-warning">パラメータ未送信 (Setup Mode)</span>';
       }
       appendTerminalLog(el.behaviorTerminal, `[ERROR] 通信失敗: ${err}`, "error-msg");
     }

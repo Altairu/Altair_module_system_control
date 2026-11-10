@@ -197,14 +197,14 @@
           <!-- 動作モードパラメータ送信 -->
           <div class="control-group">
             <h3><i class="fa-solid fa-sliders"></i> Parameter Settings</h3>
-            <p class="group-desc">MDDモータの制御を開始するにはパラメータを一括送信してください。</p>
+            <p class="group-desc">MDDモータの制御パラメータ（PID・車輪径・モード等）をマイコンへ一括送信します。</p>
             <div class="btn-row-centered">
-              <button class="btn btn-success btn-lg" id="btn-send-params">
-                <i class="fa-solid fa-play"></i> Send Params & Start
+              <button class="btn btn-primary btn-lg" id="btn-send-params">
+                <i class="fa-solid fa-paper-plane"></i> Send Params
               </button>
             </div>
             <div class="control-status" id="control-mode-status">
-              ステータス: <span class="badge badge-warning">パラメータ送信待ち (Setup Mode)</span>
+              ステータス: <span class="badge badge-warning">パラメータ未送信 (Setup Mode)</span>
             </div>
           </div>
 
