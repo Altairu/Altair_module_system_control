@@ -2835,7 +2835,10 @@ document.addEventListener("DOMContentLoaded", () => {
     menuAbout.addEventListener("click", () => helpAboutModal.classList.add("active"));
   }
 
-  checkAppUpdate(false);
+  // 起動時の自動更新確認は、画面描画と初期操作を一切妨げないよう2秒後にバックグラウンドで遅延実行
+  setTimeout(() => {
+    checkAppUpdate(false);
+  }, 2000);
 
   // 全画面表示の切り替え
   const btnFullscreen = document.getElementById("btn-fullscreen-toggle");

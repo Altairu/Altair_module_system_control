@@ -32,6 +32,9 @@ const INDEX_HTML: &str = include_str!("../index.html");
 const STYLES_CSS: &str = include_str!("../css/styles.css");
 const APP_JS: &str = include_str!("../js/app.js");
 const GAMEPAD_JS: &str = include_str!("../js/gamepad.js");
+const BLOCKLY_JS: &str = include_str!("../js/vendor/blockly.min.js");
+const BLOCKLY_PYTHON_JS: &str = include_str!("../js/vendor/python_compressed.js");
+const BLOCKLY_JA_JS: &str = include_str!("../js/vendor/ja.js");
 
 /// 埋め込みファイルをキャッシュ無効で返す
 fn embedded_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
@@ -78,6 +81,18 @@ async fn serve_app_js() -> impl IntoResponse {
 
 async fn serve_gamepad_js() -> impl IntoResponse {
     embedded_response("application/javascript; charset=utf-8", GAMEPAD_JS)
+}
+
+async fn serve_blockly_js() -> impl IntoResponse {
+    embedded_response("application/javascript; charset=utf-8", BLOCKLY_JS)
+}
+
+async fn serve_blockly_python_js() -> impl IntoResponse {
+    embedded_response("application/javascript; charset=utf-8", BLOCKLY_PYTHON_JS)
+}
+
+async fn serve_blockly_ja_js() -> impl IntoResponse {
+    embedded_response("application/javascript; charset=utf-8", BLOCKLY_JA_JS)
 }
 
 use crate::behavior_runner::BehaviorRunner;
@@ -300,6 +315,9 @@ pub async fn start_altair_server(port: u16) -> Result<AppState, String> {
         .route("/css/styles.css", get(serve_styles_css))
         .route("/js/app.js", get(serve_app_js))
         .route("/js/gamepad.js", get(serve_gamepad_js))
+        .route("/js/vendor/blockly.min.js", get(serve_blockly_js))
+        .route("/js/vendor/python_compressed.js", get(serve_blockly_python_js))
+        .route("/js/vendor/ja.js", get(serve_blockly_ja_js))
         .nest_service("/docs", ServeDir::new(project_root.join("docs")))
         .with_state(state.clone());
 

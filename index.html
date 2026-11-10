@@ -5,21 +5,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Altair_module_system_control</title>
-  <!-- Google Fonts & FontAwesome -->
+  <!-- Google Fonts & FontAwesome (非同期ロードで初期レンダリングブロックを解除) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
-    rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    rel="stylesheet" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  </noscript>
 
   <!-- CSS -->
   <link rel="stylesheet" href="/css/styles.css">
 
-  <!-- Google Blockly CDN (最新の安定動作バージョン) -->
-  <script src="https://unpkg.com/blockly/blockly.min.js"></script>
-  <script src="https://unpkg.com/blockly/python_compressed.js"></script>
-  <script src="https://unpkg.com/blockly/msg/ja.js"></script>
+  <!-- Google Blockly (ローカルバンドル配信で瞬時起動) -->
+  <script src="/js/vendor/blockly.min.js"></script>
+  <script src="/js/vendor/python_compressed.js"></script>
+  <script src="/js/vendor/ja.js"></script>
 </head>
 
 <body>
