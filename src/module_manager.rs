@@ -162,7 +162,9 @@ impl ModuleManager {
             let mut g = self.inner.lock().unwrap();
             g.mdd_targets.insert(name.to_string(), arr);
 
-            if g.is_running && !g.is_sending_params {
+            let any_non_zero = arr.iter().any(|&t| t.abs() > 0.001);
+            // 制御実行中、または手動操作中（目標値指示あり）でパラメータ送信中以外は即時送信
+            if (g.is_running || any_non_zero) && !g.is_sending_params {
                 if let Some(m) = g.config.modules.iter().find(|m| m.name == name && m.module_type == "mdd") {
                     if let Some(base_id) = parse_hex_id(&m.base_id) {
                         let mut payload = Vec::with_capacity(8);
@@ -728,11 +730,13 @@ impl ModuleManager {
                             };
                             match m.module_type.as_str() {
                                 "mdd" => {
-                                    if !g.is_running {
-                                        continue;
-                                    }
                                     let targets =
                                         g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
+                                    let any_non_zero = targets.iter().any(|&t| t.abs() > 0.001);
+                                    // 制御実行中 (is_running) または 手動で目標値が指示されている場合は送信を継続
+                                    if !g.is_running && !any_non_zero {
+                                        continue;
+                                    }
                                     let mut payload = Vec::with_capacity(8);
                                     for t in targets {
                                         let scaled = (t * 10.0).trunc();

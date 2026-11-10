@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
     isSendingParams: false,
     mddStatuses: {}, // 各MDDモジュールのマイコン側システム状態 (0=待機中, 1=制御実行中)
     moduleSendToggles: {}, // 各モジュールへのUI指令値の送信ON/OFFトグル状態
+    moduleSendIntervals: {}, // UI操作送信ON時の定周期(20Hz)継続送信タイマー
     gamepadMappings: [], // コントローラーのマッピングデータ
   };
 
@@ -1081,6 +1082,48 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  // --- UI操作送信の継続送信タイマー管理 ---
+  function startModuleSendInterval(mod) {
+    stopModuleSendInterval(mod.name);
+    // 即時送信
+    if (mod.type === "mdd") {
+      sendMddTargetCommand(mod.name);
+    } else if (mod.type === "servo") {
+      sendServoAngleCommand(mod.name);
+    } else if (mod.type === "solenoid") {
+      sendSolenoidCommand(mod.name);
+    }
+
+    // 50ms (20Hz) 周期で最新のUI目標値を継続送信（手を離しても速度・目標値が維持される）
+    state.moduleSendIntervals[mod.name] = setInterval(() => {
+      if (!state.moduleSendToggles[mod.name]) {
+        stopModuleSendInterval(mod.name);
+        return;
+      }
+      if (mod.type === "mdd") {
+        sendMddTargetCommand(mod.name);
+      } else if (mod.type === "servo") {
+        sendServoAngleCommand(mod.name);
+      } else if (mod.type === "solenoid") {
+        sendSolenoidCommand(mod.name);
+      }
+    }, 50);
+  }
+
+  function stopModuleSendInterval(name) {
+    if (state.moduleSendIntervals && state.moduleSendIntervals[name]) {
+      clearInterval(state.moduleSendIntervals[name]);
+      delete state.moduleSendIntervals[name];
+    }
+  }
+
+  function stopAllModuleSendIntervals() {
+    if (!state.moduleSendIntervals) return;
+    Object.keys(state.moduleSendIntervals).forEach(name => {
+      stopModuleSendInterval(name);
+    });
+  }
+
   // --- モジュール操作イベントのバインディング ---
   function bindCardEvents(mod) {
     // UI操作送信トグルの状態変更イベント
@@ -1091,14 +1134,21 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       toggleSend.checked = state.moduleSendToggles[mod.name];
 
+      // もし既にON状態であれば継続送信タイマーを開始
+      if (state.moduleSendToggles[mod.name]) {
+        startModuleSendInterval(mod);
+      }
+
       toggleSend.addEventListener("change", (e) => {
         const isChecked = e.target.checked;
         state.moduleSendToggles[mod.name] = isChecked;
 
         if (isChecked) {
-          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${mod.name} へのリアルタイムUI操作送信を有効にしました。`, "system-msg");
+          appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${mod.name} へのリアルタイムUI操作送信を有効にしました（20Hzで継続送信します）。`, "system-msg");
+          startModuleSendInterval(mod);
         } else {
           appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${mod.name} へのリアルタイムUI操作送信を無効にしました（目標値をゼロに安全停止します）。`, "system-msg");
+          stopModuleSendInterval(mod.name);
 
           // トグルOFF時は安全のために目標値を0に戻す
           if (mod.type === "mdd") {
@@ -2370,9 +2420,27 @@ document.addEventListener("DOMContentLoaded", () => {
   // 非常停止
   el.btnEmergencyStop.addEventListener("click", async () => {
     appendTerminalLog(el.behaviorTerminal, "🚨 [EMERGENCY STOP] 非常停止コマンドを発行しました！", "error-msg");
+    // 全モジュールのUI継続送信タイマーを停止
+    stopAllModuleSendIntervals();
+    Object.keys(state.moduleSendToggles).forEach(name => {
+      state.moduleSendToggles[name] = false;
+      const toggle = document.getElementById(`toggle-send-${name}`);
+      if (toggle) toggle.checked = false;
+    });
+
     // 全指令を停止するために WebSocket に停止要求を一括送信
     state.config.modules.forEach(mod => {
       if (mod.type === "mdd") {
+        for (let i = 1; i <= 4; i++) {
+          const slider = document.getElementById(`range-${mod.name}-m${i}`);
+          const valEl = document.getElementById(`val-${mod.name}-m${i}`);
+          if (slider) slider.value = 0;
+          if (valEl) {
+            const mode = mod.parameters?.[`m${i}`]?.mode ?? 0;
+            const unit = mode === 0 ? "rps" : mode === 1 ? "deg" : "mm";
+            valEl.textContent = `0.0 ${unit}`;
+          }
+        }
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
           state.ws.send(JSON.stringify({ type: "mdd_cmd", name: mod.name, targets: [0, 0, 0, 0] }));
         }
