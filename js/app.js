@@ -3216,6 +3216,26 @@ document.addEventListener("DOMContentLoaded", () => {
         .appendField(new Blockly.FieldDropdown([["M1", "m1"], ["M2", "m2"], ["M3", "m3"], ["M4", "m4"], ["なし", "none"]]), "M_RR")
         .appendField(" 反転:")
         .appendField(new Blockly.FieldCheckbox("FALSE"), "INV_RR");
+      this.appendDummyInput()
+        .appendField("台形制御モード:")
+        .appendField(new Blockly.FieldDropdown([
+          ["無効 (即時追従)", "NONE"],
+          ["加減速両方", "BOTH"],
+          ["加速のみ (減速は即時)", "ACCEL_ONLY"],
+          ["減速のみ (加速は即時)", "DECEL_ONLY"]
+        ]), "RAMP_MODE");
+      this.appendDummyInput()
+        .appendField("  加速傾き (加速度): 並進:")
+        .appendField(new Blockly.FieldNumber(2000, 10, 100000, 100), "ACCEL_TRANS")
+        .appendField("mm/s²  旋回:")
+        .appendField(new Blockly.FieldNumber(5.0, 0.1, 100.0, 0.5), "ACCEL_ROT")
+        .appendField("rad/s²");
+      this.appendDummyInput()
+        .appendField("  減速傾き (減速度): 並進:")
+        .appendField(new Blockly.FieldNumber(2000, 10, 100000, 100), "DECEL_TRANS")
+        .appendField("mm/s²  旋回:")
+        .appendField(new Blockly.FieldNumber(5.0, 0.1, 100.0, 0.5), "DECEL_ROT")
+        .appendField("rad/s²");
       this.appendValueInput("VX")
         .setCheck("Number")
         .appendField("入力 Vx (左右速度 mm/s)");
@@ -3228,7 +3248,7 @@ document.addEventListener("DOMContentLoaded", () => {
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour(260);
-      this.setTooltip("Vx, Vy, ω から足回りの逆運動学を計算し、指定したMDDモータの目標値へ指示します。各タイヤ直径はパラメータ設定の値が自動使用されます。");
+      this.setTooltip("Vx, Vy, ω から足回りの逆運動学を計算し、指定したMDDモータの目標値へ指示します。台形制御モードを有効にすることで、加減速時の滑らかな速度変化（スルーレート制限・台形の傾き）を設定できます。各タイヤ直径はパラメータ設定の値が自動使用されます。");
       this.setHelpUrl("");
     }
   };
@@ -3446,6 +3466,115 @@ document.addEventListener("DOMContentLoaded", () => {
     const vy = gen.valueToCode(block, 'VY', order) || '0.0';
     const omega = gen.valueToCode(block, 'OMEGA', order) || '0.0';
 
+    const rampMode = block.getFieldValue('RAMP_MODE') || 'NONE';
+    const accelTrans = block.getFieldValue('ACCEL_TRANS') || '2000';
+    const accelRot = block.getFieldValue('ACCEL_ROT') || '5.0';
+    const decelTrans = block.getFieldValue('DECEL_TRANS') || '2000';
+    const decelRot = block.getFieldValue('DECEL_ROT') || '5.0';
+
+    let rampCode = '';
+    if (rampMode === 'NONE') {
+      rampCode = `_vx_val = float(${vx}) / 1000.0
+_vy_val = float(${vy}) / 1000.0
+_omega_val = float(${omega})
+_r_t = ${tread} / 2000.0`;
+    } else {
+      rampCode = `_raw_vx = float(${vx}) / 1000.0
+_raw_vy = float(${vy}) / 1000.0
+_raw_omega = float(${omega})
+_r_t = ${tread} / 2000.0
+
+_now_t = time.monotonic()
+if not hasattr(self, '_kinematics_ramp_${mddName}'):
+    self._kinematics_ramp_${mddName} = {
+        'vx': 0.0,
+        'vy': 0.0,
+        'omega': 0.0,
+        't': _now_t
+    }
+_ramp_state = self._kinematics_ramp_${mddName}
+_dt = _now_t - _ramp_state['t']
+_ramp_state['t'] = _now_t
+if _dt <= 0.0:
+    _dt = 0.005
+elif _dt > 0.2:
+    _dt = 0.05
+
+_c_vx, _c_vy = _ramp_state['vx'], _ramp_state['vy']
+_c_omega = _ramp_state['omega']
+
+# 並進の台形加減速計算 (m/s)
+_a_tr = ${accelTrans} / 1000.0
+_d_tr = ${decelTrans} / 1000.0
+_c_speed = math.hypot(_c_vx, _c_vy)
+_t_speed = math.hypot(_raw_vx, _raw_vy)
+_dot = _c_vx * _raw_vx + _c_vy * _raw_vy
+
+if _c_speed > 1e-4 and _dot < 0:
+    _step = _d_tr * _dt if "${rampMode}" in ("BOTH", "DECEL_ONLY") else float('inf')
+    if _c_speed <= _step:
+        _c_vx, _c_vy = 0.0, 0.0
+        _c_speed = 0.0
+    else:
+        _ratio = (_c_speed - _step) / _c_speed
+        _c_vx *= _ratio
+        _c_vy *= _ratio
+        _c_speed -= _step
+
+if _c_speed > 1e-4 and _dot < 0:
+    _vx_val, _vy_val = _c_vx, _c_vy
+else:
+    _d_vx = _raw_vx - _c_vx
+    _d_vy = _raw_vy - _c_vy
+    _d_dist = math.hypot(_d_vx, _d_vy)
+    if _d_dist < 1e-6:
+        _vx_val, _vy_val = _raw_vx, _raw_vy
+    else:
+        _is_accel = (_t_speed >= _c_speed)
+        if _is_accel:
+            _max_s = _a_tr * _dt if "${rampMode}" in ("BOTH", "ACCEL_ONLY") else float('inf')
+        else:
+            _max_s = _d_tr * _dt if "${rampMode}" in ("BOTH", "DECEL_ONLY") else float('inf')
+        if _d_dist <= _max_s:
+            _vx_val, _vy_val = _raw_vx, _raw_vy
+        else:
+            _vx_val = _c_vx + _d_vx * (_max_s / _d_dist)
+            _vy_val = _c_vy + _d_vy * (_max_s / _d_dist)
+
+# 旋回の台形加減速計算 (rad/s)
+_a_rt = ${accelRot}
+_d_rt = ${decelRot}
+_rot_rev = False
+if _c_omega != 0.0 and (_c_omega * _raw_omega < 0):
+    _step_w = _d_rt * _dt if "${rampMode}" in ("BOTH", "DECEL_ONLY") else float('inf')
+    if abs(_c_omega) <= _step_w:
+        _c_omega = 0.0
+    else:
+        _c_omega -= math.copysign(_step_w, _c_omega)
+        _rot_rev = True
+
+if _rot_rev:
+    _omega_val = _c_omega
+else:
+    _d_w = _raw_omega - _c_omega
+    if abs(_d_w) < 1e-6:
+        _omega_val = _raw_omega
+    else:
+        _is_accel_w = (abs(_raw_omega) >= abs(_c_omega))
+        if _is_accel_w:
+            _max_sw = _a_rt * _dt if "${rampMode}" in ("BOTH", "ACCEL_ONLY") else float('inf')
+        else:
+            _max_sw = _d_rt * _dt if "${rampMode}" in ("BOTH", "DECEL_ONLY") else float('inf')
+        if abs(_d_w) <= _max_sw:
+            _omega_val = _raw_omega
+        else:
+            _omega_val = _c_omega + math.copysign(_max_sw, _d_w)
+
+_ramp_state['vx'] = _vx_val
+_ramp_state['vy'] = _vy_val
+_ramp_state['omega'] = _omega_val`;
+    }
+
     return `
 # ロボット運動学計算と目標速度送信 (キャッシュにより超低遅延で実行)
 if not hasattr(self, '_kinematics_cache_${mddName}'):
@@ -3466,10 +3595,7 @@ if not hasattr(self, '_kinematics_cache_${mddName}'):
     )
 _k_lf, _k_rf, _k_lr, _k_rr, _mdd_mod = self._kinematics_cache_${mddName}
 
-_vx_val = float(${vx}) / 1000.0
-_vy_val = float(${vy}) / 1000.0
-_omega_val = float(${omega})
-_r_t = ${tread} / 2000.0
+${rampCode}
 
 _target_speeds = [0.0, 0.0, 0.0, 0.0]
 if "${type}" == "3_OMNI":
@@ -3625,6 +3751,11 @@ if __name__ == '__main__':
           <field name="M_RF">m2</field>
           <field name="M_LR">m3</field>
           <field name="M_RR">m4</field>
+          <field name="RAMP_MODE">NONE</field>
+          <field name="ACCEL_TRANS">2000</field>
+          <field name="ACCEL_ROT">5.0</field>
+          <field name="DECEL_TRANS">2000</field>
+          <field name="DECEL_ROT">5.0</field>
           <value name="VX">
             <block type="gamepad_axis_scaled">
               <field name="AXIS">0</field>
