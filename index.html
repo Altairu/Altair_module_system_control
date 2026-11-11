@@ -19,11 +19,6 @@
 
   <!-- CSS -->
   <link rel="stylesheet" href="/css/styles.css">
-
-  <!-- Google Blockly (ローカルバンドル配信で瞬時起動) -->
-  <script src="/js/vendor/blockly.min.js"></script>
-  <script src="/js/vendor/python_compressed.js"></script>
-  <script src="/js/vendor/ja.js"></script>
 </head>
 
 <body>
@@ -933,9 +928,12 @@
     </div>
   </div>
 
-  <!-- JavaScript -->
-  <script src="/js/app.js"></script>
-  <script src="/js/gamepad.js"></script>
+  <!-- JavaScript (defer / 末尾配置によりDOMパースと初期画面描画を高速化) -->
+  <script defer src="/js/vendor/blockly.min.js"></script>
+  <script defer src="/js/vendor/python_compressed.js"></script>
+  <script defer src="/js/vendor/ja.js"></script>
+  <script defer src="/js/app.js"></script>
+  <script defer src="/js/gamepad.js"></script>
 </body>
 
 </html>

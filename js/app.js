@@ -124,13 +124,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      // 非表示タブで初期化されたBlocklyを表示時に再レイアウトする
-      if (targetId === "view-automation" && blocklyWorkspace && typeof Blockly !== "undefined") {
-        requestAnimationFrame(() => {
+      // Automationタブが初めて開かれたときにBlocklyを遅延初期化してアプリ起動を高速化
+      if (targetId === "view-automation") {
+        if (typeof initBlocklyIfNeeded === "function") {
+          initBlocklyIfNeeded();
+        }
+        if (blocklyWorkspace && typeof Blockly !== "undefined") {
           requestAnimationFrame(() => {
-            Blockly.svgResize(blocklyWorkspace);
+            requestAnimationFrame(() => {
+              Blockly.svgResize(blocklyWorkspace);
+            });
           });
-        });
+        }
       }
 
       // CANログ画面を開いた際に最新の履歴・集計を即座に描画する
@@ -2480,12 +2485,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- 13. 初期化処理の実行 ---
+  // --- 13. 初期化処理の実行 (並列フェッチで初期画面描画を高速化) ---
   connectWebSocket();
-  loadConfigAndRender();
-  refreshPorts();
-  refreshProfiles();
-  refreshBehaviors();
+  Promise.allSettled([
+    loadConfigAndRender(),
+    refreshPorts(),
+    refreshProfiles(),
+    refreshBehaviors()
+  ]).catch(err => console.error("初期化データ取得エラー:", err));
 
   // GitHub Releases アップデート確認・適用 ＆ デスクトップメニューバー制御
   const lblAppVersion = document.getElementById("lbl-app-version");
@@ -3797,45 +3804,7 @@ if __name__ == '__main__':
     </xml>
   `;
 
-  const blocklyDiv = document.getElementById('blocklyDiv');
-  if (blocklyDiv && typeof Blockly !== 'undefined') {
-    const toolboxDom = Blockly.utils.xml.textToDom(toolboxXml);
-    blocklyWorkspace = Blockly.inject('blocklyDiv', {
-      toolbox: toolboxDom,
-      scrollbars: true,
-      trashcan: true,
-      grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
-      zoom: { controls: true, wheel: true }
-    });
-  }
-
-  // 既存コード互換のため参照名を維持
-  const workspace = blocklyWorkspace;
-
-  // サーバーから保存済みBlocklyワークスペースをロードして復元
-  if (workspace && typeof Blockly !== 'undefined') {
-    fetch("/api/behavior/get_blockly_workspace")
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.xml) {
-          try {
-            workspace.clear();
-            const dom = Blockly.utils.xml.textToDom(data.xml);
-            Blockly.Xml.domToWorkspace(dom, workspace);
-            console.log("Blocklyワークスペースを正常に復元しました。");
-          } catch (restoreErr) {
-            console.error("Blocklyワークスペースの復元に失敗しました。デフォルトをロードします:", restoreErr);
-            loadDefaultEntryBlock(workspace);
-          }
-        } else {
-          loadDefaultEntryBlock(workspace);
-        }
-      })
-      .catch(err => {
-        console.error("Blocklyワークスペースのロードエラー:", err);
-        loadDefaultEntryBlock(workspace);
-      });
-  }
+  let blocklyInitialized = false;
 
   function loadDefaultEntryBlock(ws) {
     try {
@@ -3848,29 +3817,74 @@ if __name__ == '__main__':
     }
   }
 
-  // リアルタイムにコードを生成＆プレビュー
-  if (workspace) {
-    workspace.addChangeListener(() => {
-      try {
-        const rawCode = Blockly.Python.workspaceToCode(workspace);
-        const fullPython = generatePythonCode(rawCode);
-        const codeArea = document.getElementById("blockly-code-area");
-        if (codeArea) {
-          codeArea.textContent = fullPython;
+  // Automationタブが選択された時に初めてBlocklyを初期化する (起動速度を最大化)
+  function initBlocklyIfNeeded() {
+    if (blocklyInitialized) return blocklyWorkspace;
+    const blocklyDiv = document.getElementById('blocklyDiv');
+    if (!blocklyDiv || typeof Blockly === 'undefined') return null;
+
+    blocklyInitialized = true;
+    try {
+      const toolboxDom = Blockly.utils.xml.textToDom(toolboxXml);
+      blocklyWorkspace = Blockly.inject('blocklyDiv', {
+        toolbox: toolboxDom,
+        scrollbars: true,
+        trashcan: true,
+        grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
+        zoom: { controls: true, wheel: true }
+      });
+
+      // サーバーから保存済みBlocklyワークスペースをロードして復元
+      fetch("/api/behavior/get_blockly_workspace")
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.xml) {
+            try {
+              blocklyWorkspace.clear();
+              const dom = Blockly.utils.xml.textToDom(data.xml);
+              Blockly.Xml.domToWorkspace(dom, blocklyWorkspace);
+              console.log("Blocklyワークスペースを正常に復元しました。");
+            } catch (restoreErr) {
+              console.error("Blocklyワークスペースの復元に失敗しました。デフォルトをロードします:", restoreErr);
+              loadDefaultEntryBlock(blocklyWorkspace);
+            }
+          } else {
+            loadDefaultEntryBlock(blocklyWorkspace);
+          }
+        })
+        .catch(err => {
+          console.error("Blocklyワークスペースのロードエラー:", err);
+          loadDefaultEntryBlock(blocklyWorkspace);
+        });
+
+      // リアルタイムにコードを生成＆プレビュー
+      blocklyWorkspace.addChangeListener(() => {
+        try {
+          const rawCode = Blockly.Python.workspaceToCode(blocklyWorkspace);
+          const fullPython = generatePythonCode(rawCode);
+          const codeArea = document.getElementById("blockly-code-area");
+          if (codeArea) {
+            codeArea.textContent = fullPython;
+          }
+        } catch (err) {
+          const codeArea = document.getElementById("blockly-code-area");
+          if (codeArea) {
+            codeArea.textContent = "# コード自動生成エラー: " + err.message;
+          }
         }
-      } catch (err) {
-        const codeArea = document.getElementById("blockly-code-area");
-        if (codeArea) {
-          codeArea.textContent = "# コード自動生成エラー: " + err.message;
-        }
-      }
-    });
+      });
+    } catch (e) {
+      console.error("Blockly初期化失敗:", e);
+    }
+
+    return blocklyWorkspace;
   }
 
   // 単体「ブロックを保存」ボタンのイベント
   const btnSaveBlocklyXml = document.getElementById("btn-save-blockly-xml");
   if (btnSaveBlocklyXml) {
     btnSaveBlocklyXml.addEventListener("click", async () => {
+      const workspace = blocklyWorkspace || initBlocklyIfNeeded();
       if (!workspace) {
         appendTerminalLog(el.behaviorTerminal, "[ERROR] Blocklyワークスペースが初期化されていません。", "error-msg");
         return;
@@ -3915,6 +3929,7 @@ if __name__ == '__main__':
   const btnRunBlockly = document.getElementById("btn-run-blockly");
   if (btnRunBlockly) {
     btnRunBlockly.addEventListener("click", async () => {
+      const workspace = blocklyWorkspace || initBlocklyIfNeeded();
       if (!workspace) {
         appendTerminalLog(el.behaviorTerminal, "[ERROR] Blocklyワークスペースの初期化に失敗しています。ページを再読み込みしてください。", "error-msg");
         return;
@@ -3991,6 +4006,7 @@ if __name__ == '__main__':
   const btnExportBlocklyCode = document.getElementById("btn-export-blockly-code");
   if (btnExportBlocklyCode) {
     btnExportBlocklyCode.addEventListener("click", () => {
+      const workspace = blocklyWorkspace || initBlocklyIfNeeded();
       if (!workspace) {
         appendTerminalLog(el.behaviorTerminal, "[ERROR] Blocklyワークスペースが未初期化のため保存できません。", "error-msg");
         return;

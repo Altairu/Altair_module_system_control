@@ -413,7 +413,9 @@ async fn guard_host_and_origin(
 }
 
 async fn api_ports() -> impl IntoResponse {
-    let ports = UsbCanBridge::get_available_ports();
+    let ports = tokio::task::spawn_blocking(UsbCanBridge::get_available_ports)
+        .await
+        .unwrap_or_default();
     Json(json!({ "ports": ports }))
 }
 
