@@ -2331,6 +2331,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let editingModuleOriginalName = null;
 
+  // モジュール種類ごとの初期値定義
+  const MODULE_TYPE_DEFAULTS = {
+    mdd: { name: "MDD1", base_id: "0x200" },
+    servo: { name: "Servo1", base_id: "0x100" },
+    solenoid: { name: "SV1", base_id: "0x300" }
+  };
+  const DEFAULT_MODULE_NAMES = new Set(Object.values(MODULE_TYPE_DEFAULTS).map(d => d.name));
+  const DEFAULT_MODULE_IDS = new Set(Object.values(MODULE_TYPE_DEFAULTS).map(d => d.base_id));
+
+  // 新規追加時に種類に応じた初期値を適用する（手入力済みの項目は上書きしない）
+  function applyDefaultModuleInputs(type, force = false) {
+    const defaults = MODULE_TYPE_DEFAULTS[type];
+    if (!defaults) return;
+    const currentName = el.modalModuleName.value.trim();
+    const currentId = el.modalModuleId.value.trim();
+    if (force || !currentName || DEFAULT_MODULE_NAMES.has(currentName)) {
+      el.modalModuleName.value = defaults.name;
+    }
+    if (force || !currentId || DEFAULT_MODULE_IDS.has(currentId)) {
+      el.modalModuleId.value = defaults.base_id;
+    }
+  }
+
   window.editModule = (name) => {
     const mod = state.config.modules.find(m => m.name === name);
     if (!mod) return;
@@ -2350,11 +2373,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // モーダル制御
   el.btnAddModuleModal.addEventListener("click", () => {
     editingModuleOriginalName = null;
-    el.modalModuleName.value = "";
-    el.modalModuleId.value = "";
+    el.modalModuleType.value = "mdd";
+    applyDefaultModuleInputs("mdd", true);
     if (el.modalModuleChannel) el.modalModuleChannel.value = "default";
     el.modalModuleDesc.value = "";
     el.modal.classList.add("active");
+  });
+
+  el.modalModuleType.addEventListener("change", () => {
+    if (editingModuleOriginalName) return;
+    applyDefaultModuleInputs(el.modalModuleType.value, false);
   });
 
   el.btnCloseModal.addEventListener("click", closeModal);
