@@ -807,14 +807,31 @@
             <option value="mdd">MDD (4ch モータドライバ)</option>
             <option value="servo">Servo (6ch サーボ)</option>
             <option value="solenoid">Solenoid Valve (12ch 電磁弁)</option>
+            <option value="robomas">RoboMaster モーター (M3508 / M2006 / GM6020)</option>
           </select>
+        </div>
+        <div class="form-group" id="modal-robomas-group" style="display: none;">
+          <label>RoboMaster モーター型番 / 初期制御モード</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <select id="modal-robomas-model" class="form-input">
+              <option value="m3508">M3508 P19 (19:1)</option>
+              <option value="m2006">M2006 P36 (36:1)</option>
+              <option value="gm6020">GM6020 (直駆動)</option>
+            </select>
+            <select id="modal-robomas-mode" class="form-input">
+              <option value="current">電流出力 (-16384〜16384)</option>
+              <option value="voltage">電圧出力 (-30000〜30000)</option>
+              <option value="speed_pid">速度PID制御 (rpm)</option>
+              <option value="position_pid">位置PID制御 (deg)</option>
+            </select>
+          </div>
         </div>
         <div class="form-group">
           <label>Module Name (任意の識別名)</label>
           <input type="text" id="modal-module-name" class="form-input" placeholder="例: drive_mdd_left">
         </div>
         <div class="form-group">
-          <label>Base CAN ID (Hex形式)</label>
+          <label id="modal-id-label">Base CAN ID (Hex形式)</label>
           <input type="text" id="modal-module-id" class="form-input" placeholder="例: 0x200">
         </div>
         <div class="form-group">

@@ -1164,6 +1164,8 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
     let send_task = tokio::spawn(async move {
         let is_behavior = filter == "behavior";
         let mut last_mdd_feedback_sent = tokio::time::Instant::now();
+        let mut last_robomas_feedback_sent: std::collections::HashMap<String, tokio::time::Instant> =
+            std::collections::HashMap::new();
 
         if is_behavior {
             // Python Behavior クライアント: 生CANログは購読せず、制御/ゲームパッド/フィードバックのみを超低遅延で配信
@@ -1181,6 +1183,16 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
                             continue;
                         }
                         last_mdd_feedback_sent = tokio::time::Instant::now();
+                    }
+                    WsEvent::RobomasFeedback { name, .. } => {
+                        // モーター単位で最大 50Hz (20ms) にスロットリング
+                        let now = tokio::time::Instant::now();
+                        if let Some(prev) = last_robomas_feedback_sent.get(name) {
+                            if now.duration_since(*prev) < Duration::from_millis(20) {
+                                continue;
+                            }
+                        }
+                        last_robomas_feedback_sent.insert(name.clone(), now);
                     }
                     _ => {}
                 }
@@ -1255,6 +1267,16 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
                                 arr.iter().map(|x| x.as_bool().unwrap_or(false)).collect();
                             mm.set_solenoid_command(name, &valves);
                         }
+                    }
+                    "robomas_cmd" => {
+                        let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let target = val.get("target").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let mode = val.get("mode").and_then(|v| v.as_str());
+                        mm.set_robomas_command(name, target, mode);
+                    }
+                    "robomas_reset_zero" => {
+                        let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        mm.reset_robomas_zero(name);
                     }
                     "gamepad_input" | "gamepad_state" => {
                         let buttons: Vec<bool> = val

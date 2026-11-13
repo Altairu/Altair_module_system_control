@@ -195,6 +195,24 @@ class MddFeedback:
         self.speeds = [0.0, 0.0, 0.0, 0.0]
 
 
+class RobomasFeedback:
+    """
+    RoboMaster モーター フィードバックデータ構造 (altair_interfaces/msg/RobomasFeedback 互換)
+    """
+
+    def __init__(self):
+        self.raw_angle = 0
+        self.single_angle_deg = 0.0
+        self.angle_deg = 0.0
+        self.speed_rpm = 0
+        self.torque_current = 0
+        self.current_a = 0.0
+        self.temperature = 0
+        self.output_cmd = 0
+        self.target = 0.0
+        self.control_mode = "current"
+
+
 class GamepadState:
     """
     ゲームコントローラーの各スイッチやスティックの入力を変数として保持するクラス
@@ -333,6 +351,67 @@ class SolenoidClient:
             self.set_valves(self.valves_state)
 
 
+class RobomasClient:
+    """
+    RoboMaster モーター (M3508 / M2006 / GM6020) 制御用クライアントクラス
+    """
+
+    def __init__(self, behavior, name):
+        self.behavior = behavior
+        self.name = name
+        self.latest_feedback = RobomasFeedback()
+        self._last_send_time = 0.0
+
+    def set_target(self, target, mode=None):
+        val = float(target)
+        if not math.isfinite(val):
+            val = 0.0
+        now = time.monotonic()
+        elapsed = now - self._last_send_time
+        if elapsed < 0.005:
+            time.sleep(0.005 - elapsed)
+            now = time.monotonic()
+        self._last_send_time = now
+
+        payload = {
+            "type": "robomas_cmd",
+            "name": self.name,
+            "target": val,
+        }
+        if mode:
+            payload["mode"] = str(mode)
+        self.behavior._ws.send_json(payload)
+
+    def set_current(self, current_cmd):
+        """電流指令値を設定します (-16384〜16384)"""
+        self.set_target(current_cmd, mode="current")
+
+    def set_voltage(self, voltage_cmd):
+        """電圧指令値を設定します (-30000〜30000, GM6020用)"""
+        self.set_target(voltage_cmd, mode="voltage")
+
+    def set_speed(self, rpm):
+        """速度PIDの目標回転数 [rpm] を設定します"""
+        self.set_target(rpm, mode="speed_pid")
+
+    def set_position(self, deg):
+        """位置PIDの目標角度 [deg] を設定します"""
+        self.set_target(deg, mode="position_pid")
+
+    def reset_zero(self):
+        """多回転累積角度の現在位置を 0° にリセットします"""
+        self.behavior._ws.send_json(
+            {"type": "robomas_reset_zero", "name": self.name}
+        )
+
+    def stop(self):
+        """出力をゼロにして停止します"""
+        self.set_target(0.0, mode="current")
+
+    def get_feedback(self):
+        return self.latest_feedback
+
+
 class AltairBehavior:
     """
     すべてのユーザー動作プログラム（Behavior）のベースクラス (ROS2不要スタンドアロン対応版)
@@ -398,6 +477,23 @@ class AltairBehavior:
                         for x in data.get("speeds", [0.0, 0.0, 0.0, 0.0])
                     ]
                     client.latest_feedback = fb
+            elif mtype == "robomas_feedback":
+                name = msg.get("name")
+                data = msg.get("data", {})
+                client = self._module_clients.get(name)
+                if isinstance(client, RobomasClient):
+                    fb = RobomasFeedback()
+                    fb.raw_angle = int(data.get("raw_angle", 0))
+                    fb.single_angle_deg = float(data.get("single_angle_deg", 0.0))
+                    fb.angle_deg = float(data.get("angle_deg", 0.0))
+                    fb.speed_rpm = int(data.get("speed_rpm", 0))
+                    fb.torque_current = int(data.get("torque_current", 0))
+                    fb.current_a = float(data.get("current_a", 0.0))
+                    fb.temperature = int(data.get("temperature", 0))
+                    fb.output_cmd = int(data.get("output_cmd", 0))
+                    fb.target = float(data.get("target", 0.0))
+                    fb.control_mode = str(data.get("control_mode", "current"))
+                    client.latest_feedback = fb
         except Exception:
             pass
 
@@ -441,6 +537,8 @@ class AltairBehavior:
             client = ServoClient(self, name)
         elif mtype == "solenoid":
             client = SolenoidClient(self, name)
+        elif mtype == "robomas":
+            client = RobomasClient(self, name)
         else:
             self.get_logger().error(f"未知のモジュールタイプ: '{mtype}'")
             raise ValueError(f"Unknown module type '{mtype}'")

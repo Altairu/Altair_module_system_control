@@ -41,6 +41,80 @@ impl Default for MotorParam {
     }
 }
 
+/// RoboMaster モーター1台分の設定パラメータ
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RobomasParam {
+    /// モーター型番 ("m3508", "m2006", "gm6020")
+    #[serde(default = "default_robomas_model")]
+    pub motor_model: String,
+    /// 制御モード ("current", "voltage", "speed_pid", "position_pid")
+    #[serde(default = "default_robomas_mode")]
+    pub control_mode: String,
+    /// 速度PIDゲイン
+    #[serde(default = "default_rm_vel_kp")]
+    pub vel_kp: f64,
+    #[serde(default = "default_rm_vel_ki")]
+    pub vel_ki: f64,
+    #[serde(default)]
+    pub vel_kd: f64,
+    /// 位置PIDゲイン (カスケード外ループ: 角度誤差[deg] -> 目標速度[rpm])
+    #[serde(default = "default_rm_pos_kp")]
+    pub pos_kp: f64,
+    #[serde(default)]
+    pub pos_ki: f64,
+    #[serde(default)]
+    pub pos_kd: f64,
+    /// 位置PID時の最大速度制限 [rpm]
+    #[serde(default = "default_rm_max_speed")]
+    pub max_speed_rpm: f64,
+    /// 最大出力指令値 (M3508/M2006: 最大16384, GM6020電圧: 最大30000)
+    #[serde(default = "default_rm_max_output")]
+    pub max_output: f64,
+    /// 回転方向 (1 または -1)
+    #[serde(default = "default_direction")]
+    pub direction: i32,
+}
+
+fn default_robomas_model() -> String {
+    "m3508".to_string()
+}
+fn default_robomas_mode() -> String {
+    "current".to_string()
+}
+fn default_rm_vel_kp() -> f64 {
+    20.0
+}
+fn default_rm_vel_ki() -> f64 {
+    0.5
+}
+fn default_rm_pos_kp() -> f64 {
+    3.0
+}
+fn default_rm_max_speed() -> f64 {
+    300.0
+}
+fn default_rm_max_output() -> f64 {
+    10000.0
+}
+
+impl Default for RobomasParam {
+    fn default() -> Self {
+        Self {
+            motor_model: default_robomas_model(),
+            control_mode: default_robomas_mode(),
+            vel_kp: default_rm_vel_kp(),
+            vel_ki: default_rm_vel_ki(),
+            vel_kd: 0.0,
+            pos_kp: default_rm_pos_kp(),
+            pos_ki: 0.0,
+            pos_kd: 0.0,
+            max_speed_rpm: default_rm_max_speed(),
+            max_output: default_rm_max_output(),
+            direction: 1,
+        }
+    }
+}
+
 /// モジュール1台の設定データ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleConfig {
@@ -54,6 +128,8 @@ pub struct ModuleConfig {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<HashMap<String, MotorParam>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub robomas: Option<RobomasParam>,
 }
 
 fn default_control_rate_hz() -> u32 {
@@ -126,6 +202,21 @@ impl Default for MddFeedbackData {
     }
 }
 
+/// RoboMaster モーター テレメトリ・フィードバックデータ
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RobomasFeedbackData {
+    pub raw_angle: u16,
+    pub single_angle_deg: f64,
+    pub angle_deg: f64,
+    pub speed_rpm: i16,
+    pub torque_current: i16,
+    pub current_a: f64,
+    pub temperature: u8,
+    pub output_cmd: i16,
+    pub target: f64,
+    pub control_mode: String,
+}
+
 /// CAN接続ステータス通知データ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanStatusEvent {
@@ -158,6 +249,11 @@ pub enum WsEvent {
     BehaviorLog { data: String },
     #[serde(rename = "mdd_feedback")]
     MddFeedback { name: String, data: MddFeedbackData },
+    #[serde(rename = "robomas_feedback")]
+    RobomasFeedback {
+        name: String,
+        data: RobomasFeedbackData,
+    },
     #[serde(rename = "raw_can_frame")]
     RawCanFrame { data: String },
     #[serde(rename = "gamepad_input")]

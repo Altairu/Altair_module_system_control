@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use crate::types::{
-    CanFrameEvent, MddFeedbackData, ModuleConfig, ModulesConfigFile, MotorParam, WsEvent,
+    CanFrameEvent, MddFeedbackData, ModuleConfig, ModulesConfigFile, MotorParam,
+    RobomasFeedbackData, RobomasParam, WsEvent,
 };
 
 fn resolve_module_channel(m: &ModuleConfig) -> &str {
@@ -53,11 +54,189 @@ pub fn parse_hex_id(s: &str) -> Option<u16> {
     u16::from_str_radix(hex_part, 16).ok()
 }
 
+/// RoboMaster のモーターID (1〜8, GM6020は1〜7) をパースする
+/// "1"〜"8" の10進指定のほか、"0x201" などのフィードバックID表記にも対応
+pub fn parse_robomas_motor_id(s: &str, model: &str) -> Option<u8> {
+    let trimmed = s.trim();
+    if let Ok(dec) = trimmed.parse::<u16>() {
+        let max_id = if model == "gm6020" { 7 } else { 8 };
+        if (1..=max_id).contains(&dec) {
+            return Some(dec as u8);
+        }
+    }
+    if let Some(hex_val) = parse_hex_id(trimmed) {
+        if model == "gm6020" {
+            if (0x205..=0x20B).contains(&hex_val) {
+                return Some((hex_val - 0x204) as u8);
+            }
+            if (1..=7).contains(&hex_val) {
+                return Some(hex_val as u8);
+            }
+        } else {
+            if (0x201..=0x208).contains(&hex_val) {
+                return Some((hex_val - 0x200) as u8);
+            }
+            if (1..=8).contains(&hex_val) {
+                return Some(hex_val as u8);
+            }
+        }
+    }
+    None
+}
+
+/// RoboMaster モーターの (送信CAN ID, スロット番号0..3, 受信フィードバックCAN ID) を返す
+pub fn robomas_can_ids(model: &str, motor_id: u8) -> (u16, usize, u16) {
+    if model == "gm6020" {
+        if motor_id <= 4 {
+            (0x1FF, (motor_id - 1) as usize, 0x204 + motor_id as u16)
+        } else {
+            (0x2FF, (motor_id - 5) as usize, 0x204 + motor_id as u16)
+        }
+    } else if motor_id <= 4 {
+        (0x200, (motor_id - 1) as usize, 0x200 + motor_id as u16)
+    } else {
+        (0x1FF, (motor_id - 5) as usize, 0x200 + motor_id as u16)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RobomasState {
+    target: f64,
+    mode_override: Option<String>,
+    force_stop: bool,
+    angle_initialized: bool,
+    last_raw_angle: u16,
+    total_counts: i64,
+    feedback: RobomasFeedbackData,
+    vel_integral: f64,
+    vel_prev_error: f64,
+    pos_integral: f64,
+    pos_prev_error: f64,
+    last_pid_time: Option<Instant>,
+}
+
+impl Default for RobomasState {
+    fn default() -> Self {
+        Self {
+            target: 0.0,
+            mode_override: None,
+            force_stop: false,
+            angle_initialized: false,
+            last_raw_angle: 0,
+            total_counts: 0,
+            feedback: RobomasFeedbackData::default(),
+            vel_integral: 0.0,
+            vel_prev_error: 0.0,
+            pos_integral: 0.0,
+            pos_prev_error: 0.0,
+            last_pid_time: None,
+        }
+    }
+}
+
+impl RobomasState {
+    fn reset_pid(&mut self) {
+        self.vel_integral = 0.0;
+        self.vel_prev_error = 0.0;
+        self.pos_integral = 0.0;
+        self.pos_prev_error = 0.0;
+        self.last_pid_time = None;
+    }
+}
+
+/// RoboMaster モーターの制御モードに応じた出力指令値 (i16) を計算する
+fn compute_robomas_output(param: &RobomasParam, st: &mut RobomasState, now: Instant) -> i16 {
+    let dt = match st.last_pid_time {
+        Some(prev) => now.duration_since(prev).as_secs_f64().clamp(0.0005, 0.1),
+        None => 0.01,
+    };
+    st.last_pid_time = Some(now);
+
+    if st.force_stop {
+        return 0;
+    }
+
+    let mode = st
+        .mode_override
+        .as_deref()
+        .unwrap_or(param.control_mode.as_str());
+    let dir = if param.direction < 0 { -1.0 } else { 1.0 };
+    let target = st.target * dir;
+
+    let hard_limit = if param.motor_model == "gm6020" && mode != "current" {
+        30000.0
+    } else {
+        16384.0
+    };
+    let max_out = param.max_output.abs().clamp(0.0, hard_limit);
+
+    let raw_out = match mode {
+        "current" | "voltage" => {
+            st.vel_integral = 0.0;
+            st.pos_integral = 0.0;
+            target.clamp(-max_out, max_out)
+        }
+        "speed_pid" => {
+            st.pos_integral = 0.0;
+            let current_rpm = st.feedback.speed_rpm as f64;
+            let err = target - current_rpm;
+            let deriv = (err - st.vel_prev_error) / dt;
+            st.vel_prev_error = err;
+            if param.vel_ki.abs() > 1e-9 {
+                let max_i = max_out / param.vel_ki.abs();
+                st.vel_integral = (st.vel_integral + err * dt).clamp(-max_i, max_i);
+            } else {
+                st.vel_integral = 0.0;
+            }
+            (param.vel_kp * err + param.vel_ki * st.vel_integral + param.vel_kd * deriv)
+                .clamp(-max_out, max_out)
+        }
+        "position_pid" => {
+            let current_deg = st.feedback.angle_deg;
+            let pos_err = target - current_deg;
+            let pos_deriv = (pos_err - st.pos_prev_error) / dt;
+            st.pos_prev_error = pos_err;
+            let max_spd = param.max_speed_rpm.abs().max(1.0);
+            if param.pos_ki.abs() > 1e-9 {
+                let max_pi = max_spd / param.pos_ki.abs();
+                st.pos_integral = (st.pos_integral + pos_err * dt).clamp(-max_pi, max_pi);
+            } else {
+                st.pos_integral = 0.0;
+            }
+            let target_rpm = (param.pos_kp * pos_err
+                + param.pos_ki * st.pos_integral
+                + param.pos_kd * pos_deriv)
+                .clamp(-max_spd, max_spd);
+
+            let current_rpm = st.feedback.speed_rpm as f64;
+            let vel_err = target_rpm - current_rpm;
+            let vel_deriv = (vel_err - st.vel_prev_error) / dt;
+            st.vel_prev_error = vel_err;
+            if param.vel_ki.abs() > 1e-9 {
+                let max_i = max_out / param.vel_ki.abs();
+                st.vel_integral = (st.vel_integral + vel_err * dt).clamp(-max_i, max_i);
+            } else {
+                st.vel_integral = 0.0;
+            }
+            (param.vel_kp * vel_err + param.vel_ki * st.vel_integral + param.vel_kd * vel_deriv)
+                .clamp(-max_out, max_out)
+        }
+        _ => 0.0,
+    };
+
+    let out_i16 = raw_out.round().clamp(-hard_limit, hard_limit) as i16;
+    st.feedback.output_cmd = out_i16;
+    st.feedback.target = st.target;
+    st.feedback.control_mode = mode.to_string();
+    out_i16
+}
+
 struct ManagerInner {
     config: ModulesConfigFile,
     mdd_targets: HashMap<String, [f64; 4]>,
     servo_angles: HashMap<String, [u8; 6]>,
     solenoid_valves: HashMap<String, [bool; 12]>,
+    robomas_states: HashMap<String, RobomasState>,
     mdd_feedback_cache: HashMap<String, MddFeedbackData>,
     mdd_param_sent_at: HashMap<String, Instant>,
     mdd_param_confirmed: HashMap<String, bool>,
@@ -90,6 +269,7 @@ impl ModuleManager {
                 mdd_targets: HashMap::new(),
                 servo_angles: HashMap::new(),
                 solenoid_valves: HashMap::new(),
+                robomas_states: HashMap::new(),
                 mdd_feedback_cache: HashMap::new(),
                 mdd_param_sent_at: HashMap::new(),
                 mdd_param_confirmed: HashMap::new(),
@@ -131,6 +311,23 @@ impl ModuleManager {
 
         let modules = g.config.modules.clone();
         for m in modules {
+            if m.module_type == "robomas" {
+                let model = m
+                    .robomas
+                    .as_ref()
+                    .map(|p| p.motor_model.as_str())
+                    .unwrap_or("m3508");
+                if parse_robomas_motor_id(&m.base_id, model).is_some() {
+                    let entry = g.robomas_states.entry(m.name.clone()).or_default();
+                    let mode = m
+                        .robomas
+                        .as_ref()
+                        .map(|p| p.control_mode.clone())
+                        .unwrap_or_else(|| "current".to_string());
+                    entry.feedback.control_mode = mode;
+                }
+                continue;
+            }
             if parse_hex_id(&m.base_id).is_none() {
                 continue;
             }
@@ -238,6 +435,28 @@ impl ModuleManager {
             .insert(name.to_string(), arr);
     }
 
+    pub fn set_robomas_command(&self, name: &str, target: f64, mode_override: Option<&str>) {
+        let mut g = self.inner.lock().unwrap();
+        let entry = g.robomas_states.entry(name.to_string()).or_default();
+        let clean_target = if target.is_finite() { target } else { 0.0 };
+        let new_mode = mode_override.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        if new_mode != entry.mode_override {
+            entry.reset_pid();
+            entry.mode_override = new_mode;
+        }
+        entry.force_stop = false;
+        entry.target = clean_target;
+    }
+
+    pub fn reset_robomas_zero(&self, name: &str) {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(st) = g.robomas_states.get_mut(name) {
+            st.total_counts = 0;
+            st.feedback.angle_deg = 0.0;
+            st.reset_pid();
+        }
+    }
+
     pub fn emergency_stop_all(&self) {
         let modules = {
             let mut g = self.inner.lock().unwrap();
@@ -250,16 +469,38 @@ impl ModuleManager {
                     g.mdd_targets.insert(m.name.clone(), [0.0; 4]);
                 } else if m.module_type == "solenoid" {
                     g.solenoid_valves.insert(m.name.clone(), [false; 12]);
+                } else if m.module_type == "robomas" {
+                    let entry = g.robomas_states.entry(m.name.clone()).or_default();
+                    entry.force_stop = true;
+                    entry.target = 0.0;
+                    entry.reset_pid();
                 }
             }
             mods
         };
 
+        let mut sent_robomas_zero: HashMap<(String, u16), bool> = HashMap::new();
         for m in modules {
+            let ch = resolve_module_channel(&m);
+            if m.module_type == "robomas" {
+                let model = m
+                    .robomas
+                    .as_ref()
+                    .map(|p| p.motor_model.as_str())
+                    .unwrap_or("m3508");
+                if let Some(mid) = parse_robomas_motor_id(&m.base_id, model) {
+                    let (tx_id, _, _) = robomas_can_ids(model, mid);
+                    let key = (ch.to_string(), tx_id);
+                    if !sent_robomas_zero.contains_key(&key) {
+                        sent_robomas_zero.insert(key, true);
+                        (self.send_can_fn)(tx_id, &[0u8; 8], ch, false);
+                    }
+                }
+                continue;
+            }
             let Some(base_id) = parse_hex_id(&m.base_id) else {
                 continue;
             };
-            let ch = resolve_module_channel(&m);
             if m.module_type == "mdd" {
                 (self.send_can_fn)(base_id + 0x20, &[0u8; 8], ch, false);
             } else if m.module_type == "solenoid" {
@@ -279,16 +520,38 @@ impl ModuleManager {
                     g.mdd_targets.insert(m.name.clone(), [0.0; 4]);
                 } else if m.module_type == "solenoid" {
                     g.solenoid_valves.insert(m.name.clone(), [false; 12]);
+                } else if m.module_type == "robomas" {
+                    let entry = g.robomas_states.entry(m.name.clone()).or_default();
+                    entry.force_stop = true;
+                    entry.target = 0.0;
+                    entry.reset_pid();
                 }
             }
             mods
         };
 
+        let mut sent_robomas_zero: HashMap<(String, u16), bool> = HashMap::new();
         for m in modules {
+            let ch = resolve_module_channel(&m);
+            if m.module_type == "robomas" {
+                let model = m
+                    .robomas
+                    .as_ref()
+                    .map(|p| p.motor_model.as_str())
+                    .unwrap_or("m3508");
+                if let Some(mid) = parse_robomas_motor_id(&m.base_id, model) {
+                    let (tx_id, _, _) = robomas_can_ids(model, mid);
+                    let key = (ch.to_string(), tx_id);
+                    if !sent_robomas_zero.contains_key(&key) {
+                        sent_robomas_zero.insert(key, true);
+                        (self.send_can_fn)(tx_id, &[0u8; 8], ch, false);
+                    }
+                }
+                continue;
+            }
             let Some(base_id) = parse_hex_id(&m.base_id) else {
                 continue;
             };
-            let ch = resolve_module_channel(&m);
             if m.module_type == "mdd" {
                 (self.send_can_fn)(base_id + 0x20, &[0u8; 8], ch, false);
             } else if m.module_type == "solenoid" {
@@ -302,6 +565,9 @@ impl ModuleManager {
         let mut g = self.inner.lock().unwrap();
         if !g.is_sending_params {
             g.is_running = true;
+            for st in g.robomas_states.values_mut() {
+                st.force_stop = false;
+            }
         }
     }
 
@@ -368,6 +634,10 @@ impl ModuleManager {
             if g.send_session_id == session_id {
                 g.is_sending_params = false;
                 g.is_running = true;
+                for st in g.robomas_states.values_mut() {
+                    st.force_stop = false;
+                    st.reset_pid();
+                }
             }
             return Ok("パラメータが正常に送信され、制御システムが実行状態に遷移しました。".to_string());
         }
@@ -551,6 +821,11 @@ impl ModuleManager {
             for m in &mods {
                 if m.module_type == "mdd" {
                     g.mdd_targets.insert(m.name.clone(), [0.0; 4]);
+                } else if m.module_type == "robomas" {
+                    let entry = g.robomas_states.entry(m.name.clone()).or_default();
+                    entry.force_stop = false;
+                    entry.target = 0.0;
+                    entry.reset_pid();
                 }
             }
         }
@@ -712,6 +987,82 @@ impl ModuleManager {
                     }
                 }
             }
+
+            // RoboMaster モーターのフィードバック受信処理 (M3508/M2006: 0x201..0x208, GM6020: 0x205..0x20B)
+            let rm_mods: Vec<(String, String, u16, String)> = g
+                .config
+                .modules
+                .iter()
+                .filter(|m| m.module_type == "robomas")
+                .filter_map(|m| {
+                    let model = m
+                        .robomas
+                        .as_ref()
+                        .map(|p| p.motor_model.as_str())
+                        .unwrap_or("m3508")
+                        .to_string();
+                    parse_robomas_motor_id(&m.base_id, &model).map(|mid| {
+                        let (_, _, rx_id) = robomas_can_ids(&model, mid);
+                        (
+                            m.name.clone(),
+                            model,
+                            rx_id,
+                            resolve_module_channel(m).to_string(),
+                        )
+                    })
+                })
+                .collect();
+
+            for (mod_name, model, rx_id, mod_ch) in rm_mods {
+                if can_id != rx_id || !channel_matches(&mod_ch, &frame.channel) {
+                    continue;
+                }
+                if data.len() < 6 {
+                    continue;
+                }
+                let raw_angle = ((data[0] as u16) << 8) | (data[1] as u16);
+                let speed_rpm = i16::from_be_bytes([data[2], data[3]]);
+                let torque_current = i16::from_be_bytes([data[4], data[5]]);
+                let temperature = if data.len() > 6 { data[6] } else { 0 };
+
+                let st = g.robomas_states.entry(mod_name.clone()).or_default();
+                if !st.angle_initialized {
+                    st.angle_initialized = true;
+                    st.last_raw_angle = raw_angle;
+                    st.total_counts = 0;
+                } else {
+                    let mut diff = raw_angle as i32 - st.last_raw_angle as i32;
+                    if diff > 4096 {
+                        diff -= 8192;
+                    } else if diff < -4096 {
+                        diff += 8192;
+                    }
+                    st.total_counts += diff as i64;
+                    st.last_raw_angle = raw_angle;
+                }
+
+                let single_angle_deg = (raw_angle as f64) * 360.0 / 8192.0;
+                let angle_deg = (st.total_counts as f64) * 360.0 / 8192.0;
+                let current_a = match model.as_str() {
+                    "m3508" => (torque_current as f64) * 20.0 / 16384.0,
+                    "m2006" => (torque_current as f64) * 10.0 / 16384.0,
+                    "gm6020" => (torque_current as f64) * 1.62 / 16384.0,
+                    _ => (torque_current as f64) * 20.0 / 16384.0,
+                };
+
+                st.feedback.raw_angle = raw_angle;
+                st.feedback.single_angle_deg = single_angle_deg;
+                st.feedback.angle_deg = angle_deg;
+                st.feedback.speed_rpm = speed_rpm;
+                st.feedback.torque_current = torque_current;
+                st.feedback.current_a = current_a;
+                st.feedback.temperature = temperature;
+
+                events_to_send.push(WsEvent::RobomasFeedback {
+                    name: mod_name,
+                    data: st.feedback.clone(),
+                });
+            }
         }
 
         for ev in events_to_send {
@@ -733,7 +1084,7 @@ impl ModuleManager {
                 let loop_start = Instant::now();
 
                 let (frames_to_send, rate_hz) = {
-                    let g = inner.lock().unwrap();
+                    let mut g = inner.lock().unwrap();
                     let hz = if g.config.control_rate_hz > 0 {
                         g.config.control_rate_hz
                     } else {
@@ -743,19 +1094,52 @@ impl ModuleManager {
                     if g.is_sending_params {
                         (Vec::new(), hz)
                     } else {
+                        let is_running = g.is_running;
+                        let modules = g.config.modules.clone();
                         let mut frames: Vec<(u16, Vec<u8>, String)> = Vec::new();
-                        for m in &g.config.modules {
+                        // RoboMaster 用フレーム合成マップ: (channel, tx_can_id) -> ([i16; 4], 送信要否)
+                        let mut rm_groups: HashMap<(String, u16), ([i16; 4], bool)> = HashMap::new();
+
+                        for m in &modules {
+                            let mod_ch = resolve_module_channel(m).to_string();
+                            if m.module_type == "robomas" {
+                                let param = m.robomas.clone().unwrap_or_default();
+                                let Some(mid) =
+                                    parse_robomas_motor_id(&m.base_id, &param.motor_model)
+                                else {
+                                    continue;
+                                };
+                                let (tx_id, slot, _) = robomas_can_ids(&param.motor_model, mid);
+                                let st = g.robomas_states.entry(m.name.clone()).or_default();
+                                let active_manual =
+                                    !st.force_stop && st.target.abs() > 0.0001;
+                                let should_send = is_running || active_manual;
+                                let out_i16 = if should_send {
+                                    compute_robomas_output(&param, st, loop_start)
+                                } else {
+                                    st.feedback.output_cmd = 0;
+                                    0
+                                };
+                                let entry = rm_groups
+                                    .entry((mod_ch, tx_id))
+                                    .or_insert(([0i16; 4], false));
+                                entry.0[slot] = out_i16;
+                                if should_send {
+                                    entry.1 = true;
+                                }
+                                continue;
+                            }
+
                             let Some(base_id) = parse_hex_id(&m.base_id) else {
                                 continue;
                             };
-                            let mod_ch = resolve_module_channel(m).to_string();
                             match m.module_type.as_str() {
                                 "mdd" => {
                                     let targets =
                                         g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
                                     let any_non_zero = targets.iter().any(|&t| t.abs() > 0.001);
                                     // 制御実行中 (is_running) または 手動で目標値が指示されている場合は送信を継続
-                                    if !g.is_running && !any_non_zero {
+                                    if !is_running && !any_non_zero {
                                         continue;
                                     }
                                     let mut payload = Vec::with_capacity(8);
@@ -792,6 +1176,18 @@ impl ModuleManager {
                                 _ => {}
                             }
                         }
+
+                        for ((ch, tx_id), (slots, should_send)) in rm_groups {
+                            if !should_send {
+                                continue;
+                            }
+                            let mut payload = Vec::with_capacity(8);
+                            for val in slots {
+                                payload.extend_from_slice(&val.to_be_bytes());
+                            }
+                            frames.push((tx_id, payload, ch));
+                        }
+
                         (frames, hz)
                     }
                 };

@@ -96,6 +96,10 @@ document.addEventListener("DOMContentLoaded", () => {
     btnCancelModal: document.getElementById("btn-cancel-modal"),
     btnSaveModule: document.getElementById("btn-save-module"),
     modalModuleType: document.getElementById("modal-module-type"),
+    modalRobomasGroup: document.getElementById("modal-robomas-group"),
+    modalRobomasModel: document.getElementById("modal-robomas-model"),
+    modalRobomasMode: document.getElementById("modal-robomas-mode"),
+    modalIdLabel: document.getElementById("modal-id-label"),
     modalModuleName: document.getElementById("modal-module-name"),
     modalModuleId: document.getElementById("modal-module-id"),
     modalModuleChannel: document.getElementById("modal-module-channel"),
@@ -206,6 +210,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       case "mdd_feedback":
         updateMddCardFeedback(msg.name, data);
+        break;
+
+      case "robomas_feedback":
+        updateRobomasCardFeedback(msg.name, data);
         break;
 
       case "gamepad_input":
@@ -886,6 +894,8 @@ document.addEventListener("DOMContentLoaded", () => {
         contentHtml = renderServoCardHtml(mod);
       } else if (mod.type === "solenoid") {
         contentHtml = renderSolenoidCardHtml(mod);
+      } else if (mod.type === "robomas") {
+        contentHtml = renderRobomasCardHtml(mod);
       }
 
       const chVal = (mod.can_channel || "").toLowerCase();
@@ -1103,6 +1113,130 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  // --- RoboMasterカードレンダリングヘルパー ---
+  function getRobomasModeMeta(mode, model) {
+    if (mode === "voltage") {
+      return { label: "電圧出力", unit: "cmd", min: -30000, max: 30000, step: 100 };
+    }
+    if (mode === "speed_pid") {
+      const maxRpm = model === "gm6020" ? 320 : 550;
+      return { label: "速度PID", unit: "rpm", min: -maxRpm, max: maxRpm, step: 1 };
+    }
+    if (mode === "position_pid") {
+      return { label: "位置PID", unit: "deg", min: -720, max: 720, step: 1 };
+    }
+    return { label: "電流出力", unit: "cmd", min: -16384, max: 16384, step: 100 };
+  }
+
+  function getRobomasCanSummary(baseIdStr, model) {
+    const raw = String(baseIdStr || "1").trim();
+    let mid = parseInt(raw, 10);
+    if (raw.toLowerCase().startsWith("0x")) {
+      const hexVal = parseInt(raw, 16);
+      mid = model === "gm6020" ? hexVal - 0x204 : hexVal - 0x200;
+    }
+    if (isNaN(mid) || mid < 1 || mid > (model === "gm6020" ? 7 : 8)) {
+      return "ID不正";
+    }
+    let txId = 0x200;
+    let rxId = 0x200 + mid;
+    if (model === "gm6020") {
+      txId = mid <= 4 ? 0x1FF : 0x2FF;
+      rxId = 0x204 + mid;
+    } else {
+      txId = mid <= 4 ? 0x200 : 0x1FF;
+    }
+    return `ID:${mid} / TX:0x${txId.toString(16).toUpperCase()} / RX:0x${rxId.toString(16).toUpperCase()}`;
+  }
+
+  function renderRobomasCardHtml(mod) {
+    const rm = mod.robomas || {};
+    const model = rm.motor_model || "m3508";
+    const mode = rm.control_mode || (model === "gm6020" ? "voltage" : "current");
+    const meta = getRobomasModeMeta(mode, model);
+    const velKp = rm.vel_kp ?? 20.0;
+    const velKi = rm.vel_ki ?? 0.5;
+    const velKd = rm.vel_kd ?? 0.0;
+    const posKp = rm.pos_kp ?? 3.0;
+    const posKi = rm.pos_ki ?? 0.0;
+    const posKd = rm.pos_kd ?? 0.0;
+    const maxSpd = rm.max_speed_rpm ?? 300.0;
+    const maxOut = rm.max_output ?? (model === "gm6020" && mode !== "current" ? 25000 : 10000);
+    const dir = rm.direction ?? 1;
+    const canInfo = getRobomasCanSummary(mod.base_id, model);
+
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; font-size:12px;">
+        <span class="badge" style="background:rgba(16,185,129,0.14); color:#047857;">${model.toUpperCase()} (${canInfo})</span>
+        <select class="form-input rm-mode-select" data-module="${mod.name}" id="rm-mode-${mod.name}" style="width:auto; padding:3px 8px; font-size:12px;">
+          <option value="current" ${mode === "current" ? "selected" : ""}>電流出力 (-16384〜16384)</option>
+          <option value="voltage" ${mode === "voltage" ? "selected" : ""}>電圧出力 (-30000〜30000)</option>
+          <option value="speed_pid" ${mode === "speed_pid" ? "selected" : ""}>速度PID (rpm)</option>
+          <option value="position_pid" ${mode === "position_pid" ? "selected" : ""}>位置PID (deg)</option>
+        </select>
+      </div>
+
+      <div class="motor-control-row" style="margin-bottom:8px;">
+        <div class="motor-header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span class="motor-label">目標値 (${meta.label})</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <input type="number" class="form-input rm-target-num" data-module="${mod.name}" id="num-${mod.name}-rm" value="0" step="${meta.step}" style="width:90px; padding:2px 6px; font-size:12px; text-align:right;">
+            <span class="motor-val" id="val-${mod.name}-rm" style="min-width:54px;">0 ${meta.unit}</span>
+          </div>
+        </div>
+        <div class="slider-wrapper" style="display:flex; align-items:center; gap:6px;">
+          <input type="range" class="range-robomas" data-module="${mod.name}" id="range-${mod.name}-rm" min="${meta.min}" max="${meta.max}" step="${meta.step}" value="0" style="flex:1;">
+          <button class="btn btn-secondary btn-xs btn-rm-zero" data-module="${mod.name}" title="目標値を0にリセット">0</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; padding:8px; border-radius:8px; background:rgba(0,0,0,0.04); font-size:11px; margin-bottom:8px;">
+        <div><span style="color:var(--text-muted);">角度</span><br><strong id="rm-fb-angle-${mod.name}">0.0°</strong></div>
+        <div><span style="color:var(--text-muted);">速度</span><br><strong id="rm-fb-speed-${mod.name}">0 rpm</strong></div>
+        <div><span style="color:var(--text-muted);">電流</span><br><strong id="rm-fb-curr-${mod.name}">0.00 A</strong></div>
+        <div><span style="color:var(--text-muted);">温度 / 出力</span><br><strong id="rm-fb-temp-${mod.name}">0°C / 0</strong></div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+        <button class="btn btn-secondary btn-xs btn-rm-reset-origin" data-module="${mod.name}">角度原点リセット (0°)</button>
+        <button class="btn btn-secondary btn-xs btn-toggle-rm-params" data-module="${mod.name}">PID・詳細設定</button>
+      </div>
+
+      <div class="mdd-params-panel" id="rm-params-panel-${mod.name}" style="display:none; margin-top:8px; padding:8px; border-radius:8px; background:rgba(0,0,0,0.03); font-size:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;">
+          <label>型番:
+            <select class="form-input rm-param-model" data-module="${mod.name}" style="padding:2px 6px; font-size:12px;">
+              <option value="m3508" ${model === "m3508" ? "selected" : ""}>M3508 P19</option>
+              <option value="m2006" ${model === "m2006" ? "selected" : ""}>M2006 P36</option>
+              <option value="gm6020" ${model === "gm6020" ? "selected" : ""}>GM6020</option>
+            </select>
+          </label>
+          <label>回転方向:
+            <select class="form-input rm-param-dir" data-module="${mod.name}" style="padding:2px 6px; font-size:12px;">
+              <option value="1" ${dir >= 0 ? "selected" : ""}>正転 (+1)</option>
+              <option value="-1" ${dir < 0 ? "selected" : ""}>反転 (-1)</option>
+            </select>
+          </label>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-bottom:6px;">
+          <label>速度Kp <input type="number" step="0.1" class="form-input rm-param-vkp" data-module="${mod.name}" value="${velKp}" style="padding:2px 6px; font-size:12px;"></label>
+          <label>速度Ki <input type="number" step="0.05" class="form-input rm-param-vki" data-module="${mod.name}" value="${velKi}" style="padding:2px 6px; font-size:12px;"></label>
+          <label>速度Kd <input type="number" step="0.05" class="form-input rm-param-vkd" data-module="${mod.name}" value="${velKd}" style="padding:2px 6px; font-size:12px;"></label>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-bottom:6px;">
+          <label>位置Kp <input type="number" step="0.1" class="form-input rm-param-pkp" data-module="${mod.name}" value="${posKp}" style="padding:2px 6px; font-size:12px;"></label>
+          <label>位置Ki <input type="number" step="0.01" class="form-input rm-param-pki" data-module="${mod.name}" value="${posKi}" style="padding:2px 6px; font-size:12px;"></label>
+          <label>位置Kd <input type="number" step="0.05" class="form-input rm-param-pkd" data-module="${mod.name}" value="${posKd}" style="padding:2px 6px; font-size:12px;"></label>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+          <label>位置PID最大速度 (rpm) <input type="number" step="10" class="form-input rm-param-maxspd" data-module="${mod.name}" value="${maxSpd}" style="padding:2px 6px; font-size:12px;"></label>
+          <label>最大出力制限 (cmd) <input type="number" step="500" class="form-input rm-param-maxout" data-module="${mod.name}" value="${maxOut}" style="padding:2px 6px; font-size:12px;"></label>
+        </div>
+        <button class="btn btn-primary btn-xs btn-save-rm-params" data-module="${mod.name}" style="width:100%;">設定を保存・反映</button>
+      </div>
+    `;
+  }
+
   // --- UI操作送信の継続送信タイマー管理 ---
   function startModuleSendInterval(mod) {
     stopModuleSendInterval(mod.name);
@@ -1113,6 +1247,8 @@ document.addEventListener("DOMContentLoaded", () => {
       sendServoAngleCommand(mod.name);
     } else if (mod.type === "solenoid") {
       sendSolenoidCommand(mod.name);
+    } else if (mod.type === "robomas") {
+      sendRobomasCommand(mod.name);
     }
 
     // 50ms (20Hz) 周期で最新のUI目標値を継続送信（手を離しても速度・目標値が維持される）
@@ -1127,6 +1263,8 @@ document.addEventListener("DOMContentLoaded", () => {
         sendServoAngleCommand(mod.name);
       } else if (mod.type === "solenoid") {
         sendSolenoidCommand(mod.name);
+      } else if (mod.type === "robomas") {
+        sendRobomasCommand(mod.name);
       }
     }, 50);
   }
@@ -1203,6 +1341,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 type: "servo_cmd",
                 name: mod.name,
                 angles: [90, 90, 90, 90, 90, 90]
+              }));
+            }
+          } else if (mod.type === "robomas") {
+            const slider = document.getElementById(`range-${mod.name}-rm`);
+            const numInput = document.getElementById(`num-${mod.name}-rm`);
+            const valEl = document.getElementById(`val-${mod.name}-rm`);
+            const mode = mod.robomas?.control_mode || "current";
+            const meta = getRobomasModeMeta(mode, mod.robomas?.motor_model || "m3508");
+            if (slider) slider.value = 0;
+            if (numInput) numInput.value = 0;
+            if (valEl) valEl.textContent = `0 ${meta.unit}`;
+            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+              state.ws.send(JSON.stringify({
+                type: "robomas_cmd",
+                name: mod.name,
+                target: 0,
+                mode: "current"
               }));
             }
           }
@@ -1445,6 +1600,112 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         });
       });
+
+    } else if (mod.type === "robomas") {
+      const slider = document.getElementById(`range-${mod.name}-rm`);
+      const numInput = document.getElementById(`num-${mod.name}-rm`);
+      const valEl = document.getElementById(`val-${mod.name}-rm`);
+      const modeSel = document.getElementById(`rm-mode-${mod.name}`);
+
+      const syncTargetUi = (val) => {
+        const mode = modeSel ? modeSel.value : (mod.robomas?.control_mode || "current");
+        const meta = getRobomasModeMeta(mode, mod.robomas?.motor_model || "m3508");
+        const numVal = parseFloat(val) || 0;
+        if (slider) slider.value = Math.max(meta.min, Math.min(meta.max, numVal));
+        if (numInput) numInput.value = numVal;
+        if (valEl) valEl.textContent = `${numVal} ${meta.unit}`;
+        if (state.moduleSendToggles[mod.name]) {
+          sendRobomasCommand(mod.name);
+        }
+      };
+
+      if (slider) {
+        slider.addEventListener("input", (e) => syncTargetUi(e.target.value));
+      }
+      if (numInput) {
+        numInput.addEventListener("change", (e) => syncTargetUi(e.target.value));
+      }
+
+      const btnZero = document.querySelector(`.btn-rm-zero[data-module="${mod.name}"]`);
+      if (btnZero) {
+        btnZero.addEventListener("click", () => syncTargetUi(0));
+      }
+
+      const btnResetOrigin = document.querySelector(`.btn-rm-reset-origin[data-module="${mod.name}"]`);
+      if (btnResetOrigin) {
+        btnResetOrigin.addEventListener("click", () => {
+          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({ type: "robomas_reset_zero", name: mod.name }));
+          }
+        });
+      }
+
+      if (modeSel) {
+        modeSel.addEventListener("change", async (e) => {
+          const newMode = e.target.value;
+          if (!mod.robomas) mod.robomas = {};
+          mod.robomas.control_mode = newMode;
+          const meta = getRobomasModeMeta(newMode, mod.robomas.motor_model || "m3508");
+          if (slider) {
+            slider.min = meta.min;
+            slider.max = meta.max;
+            slider.step = meta.step;
+            slider.value = 0;
+          }
+          if (numInput) {
+            numInput.step = meta.step;
+            numInput.value = 0;
+          }
+          if (valEl) valEl.textContent = `0 ${meta.unit}`;
+          await fetch("/api/config/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(state.config)
+          }).catch(() => {});
+          if (state.moduleSendToggles[mod.name]) {
+            sendRobomasCommand(mod.name);
+          }
+        });
+      }
+
+      const btnToggle = document.querySelector(`.btn-toggle-rm-params[data-module="${mod.name}"]`);
+      const panel = document.getElementById(`rm-params-panel-${mod.name}`);
+      if (btnToggle && panel) {
+        btnToggle.addEventListener("click", () => {
+          panel.style.display = panel.style.display === "none" ? "block" : "none";
+        });
+      }
+
+      const btnSave = document.querySelector(`.btn-save-rm-params[data-module="${mod.name}"]`);
+      if (btnSave) {
+        btnSave.addEventListener("click", async () => {
+          if (!mod.robomas) mod.robomas = {};
+          mod.robomas.motor_model = document.querySelector(`.rm-param-model[data-module="${mod.name}"]`).value;
+          mod.robomas.direction = parseInt(document.querySelector(`.rm-param-dir[data-module="${mod.name}"]`).value, 10) || 1;
+          mod.robomas.control_mode = modeSel ? modeSel.value : (mod.robomas.control_mode || "current");
+          mod.robomas.vel_kp = parseFloat(document.querySelector(`.rm-param-vkp[data-module="${mod.name}"]`).value) || 0;
+          mod.robomas.vel_ki = parseFloat(document.querySelector(`.rm-param-vki[data-module="${mod.name}"]`).value) || 0;
+          mod.robomas.vel_kd = parseFloat(document.querySelector(`.rm-param-vkd[data-module="${mod.name}"]`).value) || 0;
+          mod.robomas.pos_kp = parseFloat(document.querySelector(`.rm-param-pkp[data-module="${mod.name}"]`).value) || 0;
+          mod.robomas.pos_ki = parseFloat(document.querySelector(`.rm-param-pki[data-module="${mod.name}"]`).value) || 0;
+          mod.robomas.pos_kd = parseFloat(document.querySelector(`.rm-param-pkd[data-module="${mod.name}"]`).value) || 0;
+          mod.robomas.max_speed_rpm = parseFloat(document.querySelector(`.rm-param-maxspd[data-module="${mod.name}"]`).value) || 300;
+          mod.robomas.max_output = parseFloat(document.querySelector(`.rm-param-maxout[data-module="${mod.name}"]`).value) || 10000;
+
+          try {
+            const res = await fetch("/api/config/update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(state.config)
+            });
+            const data = await res.json();
+            appendTerminalLog(el.behaviorTerminal, `[SYSTEM] ${mod.name} のRoboMaster設定を保存しました: ${data.message}`);
+            await loadConfigAndRender();
+          } catch (err) {
+            appendTerminalLog(el.behaviorTerminal, `[ERROR] 設定保存失敗: ${err}`, "error-msg");
+          }
+        });
+      }
     }
   }
 
@@ -1499,6 +1760,34 @@ document.addEventListener("DOMContentLoaded", () => {
       valves: valves
     };
     state.ws.send(JSON.stringify(payload));
+  }
+
+  function sendRobomasCommand(moduleName) {
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+    const numInput = document.getElementById(`num-${moduleName}-rm`);
+    const slider = document.getElementById(`range-${moduleName}-rm`);
+    const modeSel = document.getElementById(`rm-mode-${moduleName}`);
+    const target = numInput ? parseFloat(numInput.value) || 0 : (slider ? parseFloat(slider.value) || 0 : 0);
+    const payload = {
+      type: "robomas_cmd",
+      name: moduleName,
+      target: target
+    };
+    if (modeSel && modeSel.value) {
+      payload.mode = modeSel.value;
+    }
+    state.ws.send(JSON.stringify(payload));
+  }
+
+  function updateRobomasCardFeedback(name, data) {
+    const angleEl = document.getElementById(`rm-fb-angle-${name}`);
+    const speedEl = document.getElementById(`rm-fb-speed-${name}`);
+    const currEl = document.getElementById(`rm-fb-curr-${name}`);
+    const tempEl = document.getElementById(`rm-fb-temp-${name}`);
+    if (angleEl) angleEl.textContent = `${Number(data.angle_deg || 0).toFixed(1)}°`;
+    if (speedEl) speedEl.textContent = `${data.speed_rpm ?? 0} rpm`;
+    if (currEl) currEl.textContent = `${Number(data.current_a || 0).toFixed(2)} A`;
+    if (tempEl) tempEl.textContent = `${data.temperature ?? 0}°C / ${data.output_cmd ?? 0}`;
   }
 
   // --- 8. WebSocket テレメトリ（フィードバック）のカード反映 ---
@@ -2335,10 +2624,26 @@ document.addEventListener("DOMContentLoaded", () => {
   const MODULE_TYPE_DEFAULTS = {
     mdd: { name: "MDD1", base_id: "0x200" },
     servo: { name: "Servo1", base_id: "0x100" },
-    solenoid: { name: "SV1", base_id: "0x300" }
+    solenoid: { name: "SV1", base_id: "0x300" },
+    robomas: { name: "RM1", base_id: "1" }
   };
   const DEFAULT_MODULE_NAMES = new Set(Object.values(MODULE_TYPE_DEFAULTS).map(d => d.name));
   const DEFAULT_MODULE_IDS = new Set(Object.values(MODULE_TYPE_DEFAULTS).map(d => d.base_id));
+
+  function updateModalTypeUi(type) {
+    const isRobomas = type === "robomas";
+    if (el.modalRobomasGroup) {
+      el.modalRobomasGroup.style.display = isRobomas ? "block" : "none";
+    }
+    if (el.modalIdLabel) {
+      el.modalIdLabel.textContent = isRobomas
+        ? "Motor ID (1〜8, GM6020は1〜7)"
+        : "Base CAN ID (Hex形式)";
+    }
+    if (el.modalModuleId) {
+      el.modalModuleId.placeholder = isRobomas ? "例: 1" : "例: 0x200";
+    }
+  }
 
   // 新規追加時に種類に応じた初期値を適用する（手入力済みの項目は上書きしない）
   function applyDefaultModuleInputs(type, force = false) {
@@ -2366,6 +2671,12 @@ document.addEventListener("DOMContentLoaded", () => {
         ? mod.can_channel
         : "default";
     }
+    if (el.modalRobomasModel && el.modalRobomasMode) {
+      const rm = mod.robomas || {};
+      el.modalRobomasModel.value = rm.motor_model || "m3508";
+      el.modalRobomasMode.value = rm.control_mode || "current";
+    }
+    updateModalTypeUi(mod.type);
     el.modalModuleDesc.value = mod.description || "";
     el.modal.classList.add("active");
   };
@@ -2374,16 +2685,27 @@ document.addEventListener("DOMContentLoaded", () => {
   el.btnAddModuleModal.addEventListener("click", () => {
     editingModuleOriginalName = null;
     el.modalModuleType.value = "mdd";
+    updateModalTypeUi("mdd");
     applyDefaultModuleInputs("mdd", true);
+    if (el.modalRobomasModel) el.modalRobomasModel.value = "m3508";
+    if (el.modalRobomasMode) el.modalRobomasMode.value = "current";
     if (el.modalModuleChannel) el.modalModuleChannel.value = "default";
     el.modalModuleDesc.value = "";
     el.modal.classList.add("active");
   });
 
   el.modalModuleType.addEventListener("change", () => {
+    updateModalTypeUi(el.modalModuleType.value);
     if (editingModuleOriginalName) return;
     applyDefaultModuleInputs(el.modalModuleType.value, false);
   });
+
+  if (el.modalRobomasModel) {
+    el.modalRobomasModel.addEventListener("change", () => {
+      if (editingModuleOriginalName || !el.modalRobomasMode) return;
+      el.modalRobomasMode.value = el.modalRobomasModel.value === "gm6020" ? "voltage" : "current";
+    });
+  }
 
   el.btnCloseModal.addEventListener("click", closeModal);
   el.btnCancelModal.addEventListener("click", closeModal);
@@ -2434,6 +2756,24 @@ document.addEventListener("DOMContentLoaded", () => {
             m4: { p: 10.0, i: 0.0, d: 0.0, diameter: 100.0, direction: 1, mode: 0 }
           };
         }
+        if (type === "robomas") {
+          const rmModel = el.modalRobomasModel ? el.modalRobomasModel.value : "m3508";
+          const rmMode = el.modalRobomasMode ? el.modalRobomasMode.value : "current";
+          if (!mod.robomas) {
+            mod.robomas = {
+              motor_model: rmModel,
+              control_mode: rmMode,
+              vel_kp: 20.0, vel_ki: 0.5, vel_kd: 0.0,
+              pos_kp: 3.0, pos_ki: 0.0, pos_kd: 0.0,
+              max_speed_rpm: 300.0,
+              max_output: rmModel === "gm6020" && rmMode !== "current" ? 25000.0 : 10000.0,
+              direction: 1
+            };
+          } else {
+            mod.robomas.motor_model = rmModel;
+            mod.robomas.control_mode = rmMode;
+          }
+        }
       }
     } else {
       // 重複チェック
@@ -2451,6 +2791,19 @@ document.addEventListener("DOMContentLoaded", () => {
       };
       if (ch === "can1" || ch === "can2" || ch === "both") {
         newMod.can_channel = ch;
+      }
+      if (type === "robomas") {
+        const rmModel = el.modalRobomasModel ? el.modalRobomasModel.value : "m3508";
+        const rmMode = el.modalRobomasMode ? el.modalRobomasMode.value : "current";
+        newMod.robomas = {
+          motor_model: rmModel,
+          control_mode: rmMode,
+          vel_kp: 20.0, vel_ki: 0.5, vel_kd: 0.0,
+          pos_kp: 3.0, pos_ki: 0.0, pos_kd: 0.0,
+          max_speed_rpm: 300.0,
+          max_output: rmModel === "gm6020" && rmMode !== "current" ? 25000.0 : 10000.0,
+          direction: 1
+        };
       }
 
       // MDD特有の初期パラメータ構造を追加
@@ -2512,6 +2865,14 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (mod.type === "solenoid") {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
           state.ws.send(JSON.stringify({ type: "solenoid_cmd", name: mod.name, valves: new Array(12).fill(false) }));
+        }
+      } else if (mod.type === "robomas") {
+        const slider = document.getElementById(`range-${mod.name}-rm`);
+        const numInput = document.getElementById(`num-${mod.name}-rm`);
+        if (slider) slider.value = 0;
+        if (numInput) numInput.value = 0;
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+          state.ws.send(JSON.stringify({ type: "robomas_cmd", name: mod.name, target: 0, mode: "current" }));
         }
       }
     });
@@ -3146,6 +3507,62 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  Blockly.Blocks['robomas_move'] = {
+    init: function () {
+      this.appendValueInput("TARGET")
+        .setCheck("Number")
+        .appendField("RoboMaster:")
+        .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('robomas')), "NAME")
+        .appendField("モード")
+        .appendField(new Blockly.FieldDropdown([
+          ["設定値に従う", "default"],
+          ["電流出力 (cmd)", "current"],
+          ["電圧出力 (cmd)", "voltage"],
+          ["速度PID (rpm)", "speed_pid"],
+          ["位置PID (deg)", "position_pid"]
+        ]), "MODE")
+        .appendField("目標値");
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour(160);
+      this.setTooltip("RoboMasterモーターに目標値(電流/電圧/速度rpm/位置deg)を送信します。");
+      this.setHelpUrl("");
+    }
+  };
+
+  Blockly.Blocks['robomas_reset_zero'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField("RoboMaster:")
+        .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('robomas')), "NAME")
+        .appendField("の角度原点を0°にリセット");
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour(160);
+      this.setTooltip("RoboMasterモーターの累積角度を0°にリセットします。");
+      this.setHelpUrl("");
+    }
+  };
+
+  Blockly.Blocks['robomas_feedback_val'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField("RoboMaster:")
+        .appendField(new Blockly.FieldDropdown(getModuleOptionsDropdown('robomas')), "NAME")
+        .appendField("の")
+        .appendField(new Blockly.FieldDropdown([
+          ["累積角度 (deg)", "angle_deg"],
+          ["回転速度 (rpm)", "speed_rpm"],
+          ["トルク電流 (A)", "current_a"],
+          ["温度 (℃)", "temperature"]
+        ]), "FIELD");
+      this.setOutput(true, "Number");
+      this.setColour(160);
+      this.setTooltip("RoboMasterモーターのフィードバック値を取得します。");
+      this.setHelpUrl("");
+    }
+  };
+
   Blockly.Blocks['event_macro'] = {
     init: function () {
       this.appendDummyInput()
@@ -3475,6 +3892,35 @@ document.addEventListener("DOMContentLoaded", () => {
     const motorIdx = block.getFieldValue('MOTOR_IDX');
     const code = `self.get_module("${name}").get_feedback().speeds[${motorIdx}]`;
     return [code, getAtomicOrder()];
+  });
+
+  registerGenerator('robomas_move', function (block, generator) {
+    const root = block.getRootBlock();
+    if (!root || root.type !== 'event_macro') return '';
+    const name = block.getFieldValue('NAME');
+    if (name === 'none') return '';
+    const mode = block.getFieldValue('MODE');
+    const gen = generator || pyGen;
+    const target = gen.valueToCode(block, 'TARGET', getAtomicOrder()) || '0.0';
+    if (mode && mode !== 'default') {
+      return `self.get_module("${name}").set_target(${target}, mode="${mode}")\n`;
+    }
+    return `self.get_module("${name}").set_target(${target})\n`;
+  });
+
+  registerGenerator('robomas_reset_zero', function (block) {
+    const root = block.getRootBlock();
+    if (!root || root.type !== 'event_macro') return '';
+    const name = block.getFieldValue('NAME');
+    if (name === 'none') return '';
+    return `self.get_module("${name}").reset_zero()\n`;
+  });
+
+  registerGenerator('robomas_feedback_val', function (block) {
+    const name = block.getFieldValue('NAME');
+    if (name === 'none') return ['0.0', getAtomicOrder()];
+    const field = block.getFieldValue('FIELD') || 'angle_deg';
+    return [`self.get_module("${name}").get_feedback().${field}`, getAtomicOrder()];
   });
 
   registerGenerator('gamepad_axis_scaled', function (block, generator) {
@@ -3865,6 +4311,13 @@ if __name__ == '__main__':
       </category>
       <category name="電磁弁" colour="0">
         <block type="valve_control"></block>
+      </category>
+      <category name="RoboMaster" colour="160">
+        <block type="robomas_move">
+          <value name="TARGET"><block type="math_number"><field name="NUM">0</field></block></value>
+        </block>
+        <block type="robomas_reset_zero"></block>
+        <block type="robomas_feedback_val"></block>
       </category>
     </xml>
   `;
