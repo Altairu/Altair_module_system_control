@@ -98,6 +98,7 @@ document.addEventListener("DOMContentLoaded", () => {
     modalModuleType: document.getElementById("modal-module-type"),
     modalModuleName: document.getElementById("modal-module-name"),
     modalModuleId: document.getElementById("modal-module-id"),
+    modalModuleChannel: document.getElementById("modal-module-channel"),
     modalModuleDesc: document.getElementById("modal-module-desc"),
   };
 
@@ -887,6 +888,15 @@ document.addEventListener("DOMContentLoaded", () => {
         contentHtml = renderSolenoidCardHtml(mod);
       }
 
+      const chVal = (mod.can_channel || "").toLowerCase();
+      const chBadge = chVal === "can1"
+        ? '<span style="background: rgba(26,115,232,0.12); color: #1a73e8; padding: 1px 6px; border-radius: 4px; font-weight: 600;">CAN1</span>'
+        : chVal === "can2"
+          ? '<span style="background: rgba(227,116,0,0.14); color: #b06000; padding: 1px 6px; border-radius: 4px; font-weight: 600;">CAN2</span>'
+          : chVal === "both"
+            ? '<span style="background: rgba(19,115,51,0.12); color: #137333; padding: 1px 6px; border-radius: 4px; font-weight: 600;">CAN1+2</span>'
+            : '<span>CH: 全体設定</span>';
+
       card.innerHTML = `
         <div class="card-header-row">
           <div class="module-title">
@@ -894,6 +904,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="module-meta-info" style="margin-bottom: 2px;">
               <span>ID: ${mod.base_id}</span>
               <span>Type: ${mod.type.toUpperCase()}</span>
+              ${chBadge}
             </div>
             <!-- UI操作送信トグルスイッチ -->
             <div class="send-toggle-row" style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
@@ -2327,6 +2338,11 @@ document.addEventListener("DOMContentLoaded", () => {
     el.modalModuleType.value = mod.type;
     el.modalModuleName.value = mod.name;
     el.modalModuleId.value = mod.base_id;
+    if (el.modalModuleChannel) {
+      el.modalModuleChannel.value = (mod.can_channel && ["can1", "can2", "both"].includes(mod.can_channel))
+        ? mod.can_channel
+        : "default";
+    }
     el.modalModuleDesc.value = mod.description || "";
     el.modal.classList.add("active");
   };
@@ -2336,6 +2352,7 @@ document.addEventListener("DOMContentLoaded", () => {
     editingModuleOriginalName = null;
     el.modalModuleName.value = "";
     el.modalModuleId.value = "";
+    if (el.modalModuleChannel) el.modalModuleChannel.value = "default";
     el.modalModuleDesc.value = "";
     el.modal.classList.add("active");
   });
@@ -2349,6 +2366,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // フォームクリア
     el.modalModuleName.value = "";
     el.modalModuleId.value = "";
+    if (el.modalModuleChannel) el.modalModuleChannel.value = "default";
     el.modalModuleDesc.value = "";
   }
 
@@ -2356,6 +2374,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const type = el.modalModuleType.value;
     const name = el.modalModuleName.value.trim();
     const id = el.modalModuleId.value.trim();
+    const ch = el.modalModuleChannel ? el.modalModuleChannel.value : "default";
     const desc = el.modalModuleDesc.value.trim();
 
     if (!name || !id) {
@@ -2374,6 +2393,11 @@ document.addEventListener("DOMContentLoaded", () => {
         mod.type = type;
         mod.base_id = id;
         mod.description = desc;
+        if (ch === "can1" || ch === "can2" || ch === "both") {
+          mod.can_channel = ch;
+        } else {
+          delete mod.can_channel;
+        }
         if (type === "mdd" && !mod.parameters) {
           mod.parameters = {
             m1: { p: 10.0, i: 0.0, d: 0.0, diameter: 100.0, direction: 1, mode: 0 },
@@ -2397,6 +2421,9 @@ document.addEventListener("DOMContentLoaded", () => {
         base_id: id,
         description: desc
       };
+      if (ch === "can1" || ch === "can2" || ch === "both") {
+        newMod.can_channel = ch;
+      }
 
       // MDD特有の初期パラメータ構造を追加
       if (type === "mdd") {

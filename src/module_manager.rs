@@ -5,7 +5,29 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
-use crate::types::{CanFrameEvent, MddFeedbackData, ModulesConfigFile, MotorParam, WsEvent};
+use crate::types::{
+    CanFrameEvent, MddFeedbackData, ModuleConfig, ModulesConfigFile, MotorParam, WsEvent,
+};
+
+fn resolve_module_channel(m: &ModuleConfig) -> &str {
+    match m.can_channel.as_deref().map(str::trim) {
+        Some("can1") | Some("CAN1") => "can1",
+        Some("can2") | Some("CAN2") => "can2",
+        Some("both") | Some("BOTH") => "both",
+        _ => "",
+    }
+}
+
+fn channel_matches(module_ch: &str, frame_ch: &str) -> bool {
+    if frame_ch != "can1" && frame_ch != "can2" {
+        return true;
+    }
+    match module_ch {
+        "can1" => frame_ch == "can1",
+        "can2" => frame_ch == "can2",
+        _ => true,
+    }
+}
 
 #[cfg(target_os = "windows")]
 #[link(name = "winmm")]
@@ -36,10 +58,10 @@ struct ManagerInner {
     mdd_targets: HashMap<String, [f64; 4]>,
     servo_angles: HashMap<String, [u8; 6]>,
     solenoid_valves: HashMap<String, [bool; 12]>,
-    mdd_feedback_cache: HashMap<u16, MddFeedbackData>,
-    mdd_param_sent_at: HashMap<u16, Instant>,
-    mdd_param_confirmed: HashMap<u16, bool>,
-    mdd_zero_status_count: HashMap<u16, u32>,
+    mdd_feedback_cache: HashMap<String, MddFeedbackData>,
+    mdd_param_sent_at: HashMap<String, Instant>,
+    mdd_param_confirmed: HashMap<String, bool>,
+    mdd_zero_status_count: HashMap<String, u32>,
     send_session_id: u64,
     is_running: bool,
     is_sending_params: bool,
@@ -109,14 +131,14 @@ impl ModuleManager {
 
         let modules = g.config.modules.clone();
         for m in modules {
-            let Some(base_id) = parse_hex_id(&m.base_id) else {
+            if parse_hex_id(&m.base_id).is_none() {
                 continue;
-            };
+            }
             match m.module_type.as_str() {
                 "mdd" => {
                     g.mdd_targets.entry(m.name.clone()).or_insert([0.0; 4]);
                     g.mdd_feedback_cache.insert(
-                        base_id,
+                        m.name.clone(),
                         MddFeedbackData {
                             system_status: if is_running { 1 } else { 0 },
                             ..Default::default()
@@ -167,12 +189,13 @@ impl ModuleManager {
             if (g.is_running || any_non_zero) && !g.is_sending_params {
                 if let Some(m) = g.config.modules.iter().find(|m| m.name == name && m.module_type == "mdd") {
                     if let Some(base_id) = parse_hex_id(&m.base_id) {
+                        let ch = resolve_module_channel(m).to_string();
                         let mut payload = Vec::with_capacity(8);
                         for t in arr {
                             let scaled = (t * 10.0).trunc();
                             payload.extend_from_slice(&encode_int16_le(scaled));
                         }
-                        Some((base_id + 0x20, payload))
+                        Some((base_id + 0x20, payload, ch))
                     } else {
                         None
                     }
@@ -185,8 +208,8 @@ impl ModuleManager {
         };
 
         // コマンド受信時に即時CAN送信を行うことで、定期ループ（10ms）待ちの遅延を完全に排除
-        if let Some((can_id, payload)) = frame_opt {
-            (self.send_can_fn)(can_id, &payload, "can1", false);
+        if let Some((can_id, payload, ch)) = frame_opt {
+            (self.send_can_fn)(can_id, &payload, &ch, false);
         }
     }
 
@@ -236,10 +259,11 @@ impl ModuleManager {
             let Some(base_id) = parse_hex_id(&m.base_id) else {
                 continue;
             };
+            let ch = resolve_module_channel(&m);
             if m.module_type == "mdd" {
-                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1", false);
+                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], ch, false);
             } else if m.module_type == "solenoid" {
-                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1", false);
+                (self.send_can_fn)(base_id, &[0u8, 0u8], ch, false);
             }
         }
     }
@@ -264,10 +288,11 @@ impl ModuleManager {
             let Some(base_id) = parse_hex_id(&m.base_id) else {
                 continue;
             };
+            let ch = resolve_module_channel(&m);
             if m.module_type == "mdd" {
-                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], "can1", false);
+                (self.send_can_fn)(base_id + 0x20, &[0u8; 8], ch, false);
             } else if m.module_type == "solenoid" {
-                (self.send_can_fn)(base_id, &[0u8, 0u8], "can1", false);
+                (self.send_can_fn)(base_id, &[0u8, 0u8], ch, false);
             }
         }
     }
@@ -282,7 +307,7 @@ impl ModuleManager {
 
     /// 既に制御実行状態 (system_status == 1) または起動トリガ送信済みのMDDへ生存維持用の目標値フレームを送出
     fn send_keepalive_to_confirmed_mdds(&self) {
-        let frames: Vec<(u16, [u8; 8])> = {
+        let frames: Vec<(u16, [u8; 8], String)> = {
             let g = self.inner.lock().unwrap();
             let mut list = Vec::new();
             for m in &g.config.modules {
@@ -292,11 +317,11 @@ impl ModuleManager {
                 let Some(base_id) = parse_hex_id(&m.base_id) else {
                     continue;
                 };
-                let confirmed = g.mdd_param_confirmed.get(&base_id).copied().unwrap_or(false);
-                let sent_trigger = g.mdd_param_sent_at.contains_key(&base_id);
+                let confirmed = g.mdd_param_confirmed.get(&m.name).copied().unwrap_or(false);
+                let sent_trigger = g.mdd_param_sent_at.contains_key(&m.name);
                 let status_one = g
                     .mdd_feedback_cache
-                    .get(&base_id)
+                    .get(&m.name)
                     .map(|c| c.system_status == 1)
                     .unwrap_or(false);
                 if confirmed || sent_trigger || status_one {
@@ -306,13 +331,13 @@ impl ModuleManager {
                         let scaled = (t * 10.0).trunc();
                         payload[i * 2..i * 2 + 2].copy_from_slice(&encode_int16_le(scaled));
                     }
-                    list.push((base_id + 0x20, payload));
+                    list.push((base_id + 0x20, payload, resolve_module_channel(m).to_string()));
                 }
             }
             list
         };
-        for (can_id, payload) in frames {
-            (self.send_can_fn)(can_id, &payload, "can1", false);
+        for (can_id, payload, ch) in frames {
+            (self.send_can_fn)(can_id, &payload, &ch, false);
         }
     }
 
@@ -330,11 +355,9 @@ impl ModuleManager {
             let mut any_mdd = false;
             let mods = g.config.modules.clone();
             for m in &mods {
-                if m.module_type == "mdd" {
-                    if let Some(base_id) = parse_hex_id(&m.base_id) {
-                        any_mdd = true;
-                        g.mdd_param_confirmed.insert(base_id, false);
-                    }
+                if m.module_type == "mdd" && parse_hex_id(&m.base_id).is_some() {
+                    any_mdd = true;
+                    g.mdd_param_confirmed.insert(m.name.clone(), false);
                 }
             }
             (sid, any_mdd)
@@ -377,13 +400,14 @@ impl ModuleManager {
                 let Some(base_id) = parse_hex_id(&m.base_id) else {
                     continue;
                 };
+                let mod_ch = resolve_module_channel(m);
 
                 let is_confirmed = {
                     let g = self.inner.lock().unwrap();
                     if !g.is_sending_params || g.send_session_id != session_id {
                         return Err("パラメータ送信が中断されました。".to_string());
                     }
-                    g.mdd_param_confirmed.get(&base_id).copied().unwrap_or(false)
+                    g.mdd_param_confirmed.get(&m.name).copied().unwrap_or(false)
                 };
 
                 // 完了応答(system_status == 1)を受信済みのマイコンには生存維持フレームを送りスキップ
@@ -414,7 +438,7 @@ impl ModuleManager {
                     payload[4..6].copy_from_slice(&encode_int16_le(d_int));
                     payload[6..8].copy_from_slice(&encode_int16_le(dia_int));
 
-                    (self.send_can_fn)(base_id + idx, &payload, "can1", true);
+                    (self.send_can_fn)(base_id + idx, &payload, mod_ch, true);
                     // 3連送(約5ms) + STM32側15ms保持ウィンドウ + ポーリング余裕を確保するため35ms待機
                     tokio::time::sleep(Duration::from_millis(35)).await;
                 }
@@ -430,10 +454,10 @@ impl ModuleManager {
                 // 起動トリガ送信時刻を先に記録し、直後に返る status == 1 返信を確実に捕捉できるようにする
                 {
                     let mut g = self.inner.lock().unwrap();
-                    g.mdd_param_sent_at.insert(base_id, Instant::now());
+                    g.mdd_param_sent_at.insert(m.name.clone(), Instant::now());
                 }
 
-                (self.send_can_fn)(base_id + 0x10, &mode_payload, "can1", true);
+                (self.send_can_fn)(base_id + 0x10, &mode_payload, mod_ch, true);
                 tokio::time::sleep(Duration::from_millis(40)).await;
 
                 // 起動直後のマイコンおよび他マイコンが 500ms CANタイムアウト(Err:0x01)にならないよう目標値フレームを送出
@@ -454,9 +478,7 @@ impl ModuleManager {
                         (false, true)
                     } else {
                         let all_ok = mdd_modules.iter().all(|m| {
-                            parse_hex_id(&m.base_id)
-                                .and_then(|bid| g.mdd_param_confirmed.get(&bid).copied())
-                                .unwrap_or(false)
+                            g.mdd_param_confirmed.get(&m.name).copied().unwrap_or(false)
                         });
                         (all_ok, false)
                     }
@@ -483,12 +505,10 @@ impl ModuleManager {
                     let mut ok_list = Vec::new();
                     let mut ng_list = Vec::new();
                     for m in &mdd_modules {
-                        if let Some(bid) = parse_hex_id(&m.base_id) {
-                            if g.mdd_param_confirmed.get(&bid).copied().unwrap_or(false) {
-                                ok_list.push(m.name.clone());
-                            } else {
-                                ng_list.push(m.name.clone());
-                            }
+                        if g.mdd_param_confirmed.get(&m.name).copied().unwrap_or(false) {
+                            ok_list.push(m.name.clone());
+                        } else {
+                            ng_list.push(m.name.clone());
                         }
                     }
                     (ok_list, ng_list)
@@ -552,9 +572,21 @@ impl ModuleManager {
 
         {
             let mut g = self.inner.lock().unwrap();
-            let base_ids: Vec<u16> = g.mdd_feedback_cache.keys().copied().collect();
+            let mods: Vec<(String, u16, String)> = g
+                .config
+                .modules
+                .iter()
+                .filter(|m| m.module_type == "mdd")
+                .filter_map(|m| {
+                    parse_hex_id(&m.base_id)
+                        .map(|bid| (m.name.clone(), bid, resolve_module_channel(m).to_string()))
+                })
+                .collect();
 
-            for base_id in base_ids {
+            for (mod_name, base_id, mod_ch) in mods {
+                if !channel_matches(&mod_ch, &frame.channel) {
+                    continue;
+                }
                 if can_id == base_id + 0x30 {
                     if data.len() < 6 {
                         continue;
@@ -565,7 +597,7 @@ impl ModuleManager {
                     let is_sending = g.is_sending_params;
 
                     let mut reset_detected = false;
-                    if let Some(cache) = g.mdd_feedback_cache.get_mut(&base_id) {
+                    if let Some(cache) = g.mdd_feedback_cache.get_mut(&mod_name) {
                         cache.limit_switches = [
                             data[0] != 0,
                             data[1] != 0,
@@ -577,36 +609,38 @@ impl ModuleManager {
                     }
 
                     if status_byte == 1 {
-                        g.mdd_zero_status_count.insert(base_id, 0);
+                        g.mdd_zero_status_count.insert(mod_name.clone(), 0);
                         // パラメータ送信トリガ以降の status == 1 応答をもって設定完了と判定
-                        if g.mdd_param_sent_at.contains_key(&base_id) || is_sending {
-                            g.mdd_param_confirmed.insert(base_id, true);
+                        if g.mdd_param_sent_at.contains_key(&mod_name) || is_sending {
+                            g.mdd_param_confirmed.insert(mod_name.clone(), true);
                         }
                     } else {
                         // 待機状態 (status == 0)
-                        let zero_cnt = g.mdd_zero_status_count.entry(base_id).or_insert(0);
+                        let zero_cnt = g.mdd_zero_status_count.entry(mod_name.clone()).or_insert(0);
                         *zero_cnt += 1;
                         let count = *zero_cnt;
 
                         // パラメータ送信中にインフライトで届いた古い status == 0 フレームで
                         // mdd_param_sent_at を消去してしまうと以降の status == 1 を認識できなくなるため保持する
                         if is_sending {
-                            if let Some(&sent_at) = g.mdd_param_sent_at.get(&base_id) {
+                            if let Some(&sent_at) = g.mdd_param_sent_at.get(&mod_name) {
                                 if sent_at.elapsed() >= Duration::from_millis(300) {
-                                    g.mdd_param_confirmed.insert(base_id, false);
+                                    g.mdd_param_confirmed.insert(mod_name.clone(), false);
                                 }
                             }
                         } else {
                             // パラメータ送信直後の過渡期（1.5秒以内）はリセット誤判定を抑制
-                            let sent_at = g.mdd_param_sent_at.get(&base_id).copied();
+                            let sent_at = g.mdd_param_sent_at.get(&mod_name).copied();
                             let in_grace_period = sent_at
                                 .map(|t| t.elapsed() < Duration::from_millis(1500))
                                 .unwrap_or(false);
 
                             // 単発ノイズによる誤検知を防ぐため、10回連続(約100ms)かつ猶予期間外のみリセットと判定
                             if !in_grace_period && count >= 10 {
-                                let was_confirmed =
-                                    g.mdd_param_confirmed.insert(base_id, false).unwrap_or(false);
+                                let was_confirmed = g
+                                    .mdd_param_confirmed
+                                    .insert(mod_name.clone(), false)
+                                    .unwrap_or(false);
                                 if is_running && was_confirmed {
                                     reset_detected = true;
                                 }
@@ -616,38 +650,25 @@ impl ModuleManager {
 
                     if reset_detected {
                         g.is_running = false;
-                        if let Some(m) = g
-                            .config
-                            .modules
-                            .iter()
-                            .find(|m| parse_hex_id(&m.base_id) == Some(base_id))
-                        {
-                            let err_desc = match error_code {
-                                0x00 => "正常待機 (0x00)",
-                                0x01 => "初期化タイムアウト (0x01: INIT_TIMEOUT)",
-                                0x02 => "CAN受信途絶タイムアウト (0x02: CAN_RX_TIMEOUT)",
-                                0x04 => "CAN送信失敗 (0x04: CAN_TX_FAIL)",
-                                other => &format!("エラーコード (0x{:02X})", other),
-                            };
-                            events_to_send.push(WsEvent::BehaviorLog {
-                                data: format!(
-                                    "[WARN] マイコン '{}' の待機状態へのリセットを検知しました (エラー要因: {})。PC側の制御フラグを安全にリセットしました。",
-                                    m.name, err_desc
-                                ),
-                            });
-                        }
+                        let err_desc = match error_code {
+                            0x00 => "正常待機 (0x00)".to_string(),
+                            0x01 => "初期化タイムアウト (0x01: INIT_TIMEOUT)".to_string(),
+                            0x02 => "CAN受信途絶タイムアウト (0x02: CAN_RX_TIMEOUT)".to_string(),
+                            0x04 => "CAN送信失敗 (0x04: CAN_TX_FAIL)".to_string(),
+                            other => format!("エラーコード (0x{:02X})", other),
+                        };
+                        events_to_send.push(WsEvent::BehaviorLog {
+                            data: format!(
+                                "[WARN] マイコン '{}' の待機状態へのリセットを検知しました (エラー要因: {})。PC側の制御フラグを安全にリセットしました。",
+                                mod_name, err_desc
+                            ),
+                        });
                     }
 
-                    if let (Some(mut cache), Some(m)) = (
-                        g.mdd_feedback_cache.get(&base_id).cloned(),
-                        g.config
-                            .modules
-                            .iter()
-                            .find(|m| parse_hex_id(&m.base_id) == Some(base_id)),
-                    ) {
-                        cache.targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
+                    if let Some(mut cache) = g.mdd_feedback_cache.get(&mod_name).cloned() {
+                        cache.targets = g.mdd_targets.get(&mod_name).copied().unwrap_or([0.0; 4]);
                         events_to_send.push(WsEvent::MddFeedback {
-                            name: m.name.clone(),
+                            name: mod_name.clone(),
                             data: cache,
                         });
                     }
@@ -655,7 +676,7 @@ impl ModuleManager {
                     if data.len() < 8 {
                         continue;
                     }
-                    if let Some(cache) = g.mdd_feedback_cache.get_mut(&base_id) {
+                    if let Some(cache) = g.mdd_feedback_cache.get_mut(&mod_name) {
                         cache.angles = [
                             decode_int16_le(data[0], data[1]) as f64 / 10.0,
                             decode_int16_le(data[2], data[3]) as f64 / 10.0,
@@ -663,16 +684,10 @@ impl ModuleManager {
                             decode_int16_le(data[6], data[7]) as f64 / 10.0,
                         ];
                     }
-                    if let (Some(mut cache), Some(m)) = (
-                        g.mdd_feedback_cache.get(&base_id).cloned(),
-                        g.config
-                            .modules
-                            .iter()
-                            .find(|m| parse_hex_id(&m.base_id) == Some(base_id)),
-                    ) {
-                        cache.targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
+                    if let Some(mut cache) = g.mdd_feedback_cache.get(&mod_name).cloned() {
+                        cache.targets = g.mdd_targets.get(&mod_name).copied().unwrap_or([0.0; 4]);
                         events_to_send.push(WsEvent::MddFeedback {
-                            name: m.name.clone(),
+                            name: mod_name.clone(),
                             data: cache,
                         });
                     }
@@ -680,7 +695,7 @@ impl ModuleManager {
                     if data.len() < 8 {
                         continue;
                     }
-                    if let Some(cache) = g.mdd_feedback_cache.get_mut(&base_id) {
+                    if let Some(cache) = g.mdd_feedback_cache.get_mut(&mod_name) {
                         cache.speeds = [
                             decode_int16_le(data[0], data[1]) as f64 / 100.0,
                             decode_int16_le(data[2], data[3]) as f64 / 100.0,
@@ -688,16 +703,10 @@ impl ModuleManager {
                             decode_int16_le(data[6], data[7]) as f64 / 100.0,
                         ];
                     }
-                    if let (Some(mut cache), Some(m)) = (
-                        g.mdd_feedback_cache.get(&base_id).cloned(),
-                        g.config
-                            .modules
-                            .iter()
-                            .find(|m| parse_hex_id(&m.base_id) == Some(base_id)),
-                    ) {
-                        cache.targets = g.mdd_targets.get(&m.name).copied().unwrap_or([0.0; 4]);
+                    if let Some(mut cache) = g.mdd_feedback_cache.get(&mod_name).cloned() {
+                        cache.targets = g.mdd_targets.get(&mod_name).copied().unwrap_or([0.0; 4]);
                         events_to_send.push(WsEvent::MddFeedback {
-                            name: m.name.clone(),
+                            name: mod_name.clone(),
                             data: cache,
                         });
                     }
@@ -734,11 +743,12 @@ impl ModuleManager {
                     if g.is_sending_params {
                         (Vec::new(), hz)
                     } else {
-                        let mut frames: Vec<(u16, Vec<u8>)> = Vec::new();
+                        let mut frames: Vec<(u16, Vec<u8>, String)> = Vec::new();
                         for m in &g.config.modules {
                             let Some(base_id) = parse_hex_id(&m.base_id) else {
                                 continue;
                             };
+                            let mod_ch = resolve_module_channel(m).to_string();
                             match m.module_type.as_str() {
                                 "mdd" => {
                                     let targets =
@@ -753,12 +763,12 @@ impl ModuleManager {
                                         let scaled = (t * 10.0).trunc();
                                         payload.extend_from_slice(&encode_int16_le(scaled));
                                     }
-                                    frames.push((base_id + 0x20, payload));
+                                    frames.push((base_id + 0x20, payload, mod_ch));
                                 }
                                 "servo" => {
                                     let angles =
                                         g.servo_angles.get(&m.name).copied().unwrap_or([90; 6]);
-                                    frames.push((base_id, angles.to_vec()));
+                                    frames.push((base_id, angles.to_vec(), mod_ch));
                                 }
                                 "solenoid" => {
                                     let valves = g
@@ -777,7 +787,7 @@ impl ModuleManager {
                                             }
                                         }
                                     }
-                                    frames.push((base_id, vec![byte0, byte1]));
+                                    frames.push((base_id, vec![byte0, byte1], mod_ch));
                                 }
                                 _ => {}
                             }
@@ -786,8 +796,8 @@ impl ModuleManager {
                     }
                 };
 
-                for (id, payload) in frames_to_send {
-                    (send_can_fn)(id, &payload, "can1", false);
+                for (id, payload, ch) in frames_to_send {
+                    (send_can_fn)(id, &payload, &ch, false);
                 }
 
                 let target_period =

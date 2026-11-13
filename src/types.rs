@@ -48,6 +48,8 @@ pub struct ModuleConfig {
     #[serde(rename = "type")]
     pub module_type: String,
     pub base_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub can_channel: Option<String>,
     #[serde(default)]
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]

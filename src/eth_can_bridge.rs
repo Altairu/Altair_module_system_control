@@ -19,6 +19,7 @@ const ANALYZER_TX_SIZE: usize = 20;
 #[derive(Clone)]
 struct TxQueueItem {
     can_id: u16,
+    send_to_can1: bool,
     send_to_can2: bool,
     is_config_frame: bool,
     payload: [u8; ANALYZER_TX_SIZE],
@@ -225,16 +226,16 @@ impl EthCanBridge {
         }
 
         let dlc = data.len().min(8);
-        let send_to_can1 = match guard.can_channel.as_str() {
-            "can1" => true,
-            "can2" => false,
-            "both" => channel != "can2",
-            _ => true,
+        let eff_channel = match channel.trim().to_ascii_lowercase().as_str() {
+            "can1" => "can1",
+            "can2" => "can2",
+            "both" => "both",
+            _ => guard.can_channel.as_str(),
         };
-        let send_to_can2 = match guard.can_channel.as_str() {
-            "can2" => true,
-            "both" => true,
-            _ => false,
+        let (send_to_can1, send_to_can2) = match eff_channel {
+            "can2" => (false, true),
+            "both" => (true, true),
+            _ => (true, false),
         };
 
         let mut payload = [0u8; ANALYZER_TX_SIZE];
@@ -255,6 +256,7 @@ impl EthCanBridge {
 
         let item = TxQueueItem {
             can_id: standard_id,
+            send_to_can1,
             send_to_can2,
             is_config_frame,
             payload,
@@ -263,10 +265,11 @@ impl EthCanBridge {
         };
 
         if is_config_frame {
-            // 既に同一CAN IDの設定フレームがキューに残っている場合は古い重複分を除去して最新設定で置き換える
+            // 既に同一CAN ID・同一チャンネルの設定フレームがキューに残っている場合は古い重複分を除去して最新設定で置き換える
             guard.tx_queue.retain(|existing| {
                 !(existing.is_config_frame
                     && existing.can_id == item.can_id
+                    && existing.send_to_can1 == item.send_to_can1
                     && existing.send_to_can2 == item.send_to_can2)
             });
             // 設定フレーム (0x200..0x203, 0x210) はSTM32側の1msタイマーで確実に拾わせるため3回連続でキューに積む
@@ -274,10 +277,11 @@ impl EthCanBridge {
                 guard.tx_queue.push_back(item.clone());
             }
         } else {
-            // 周期制御フレームは同一CAN IDの未送信フレームがあれば最新値で上書きして遅延蓄積を防ぐ
+            // 周期制御フレームは同一CAN ID・同一チャンネルの未送信フレームがあれば最新値で上書きして遅延蓄積を防ぐ
             for existing in guard.tx_queue.iter_mut() {
                 if !existing.is_config_frame
                     && existing.can_id == item.can_id
+                    && existing.send_to_can1 == item.send_to_can1
                     && existing.send_to_can2 == item.send_to_can2
                 {
                     existing.payload = item.payload;
@@ -323,7 +327,7 @@ impl EthCanBridge {
             let mut last_reconnect_attempt = Instant::now() - Duration::from_secs(2);
 
             loop {
-                let (force_disc, force_reconn, auto_reconn, target_ip, target_port, can_channel) = {
+                let (force_disc, force_reconn, auto_reconn, target_ip, target_port) = {
                     let mut g = inner.lock().unwrap();
                     let fd = g.force_disconnect;
                     let fr = g.force_reconnect;
@@ -336,7 +340,6 @@ impl EthCanBridge {
                         g.auto_reconnect,
                         g.target_ip.clone(),
                         g.target_port,
-                        g.can_channel.clone(),
                     )
                 };
 
@@ -441,7 +444,6 @@ impl EthCanBridge {
                                     buffer_filled = 0;
                                     Self::parse_and_publish_rx(
                                         &rx_buffer,
-                                        &can_channel,
                                         &mut last_rx_id,
                                         &mut last_rx_data,
                                         &mut last_rx_publish_time0,
@@ -520,7 +522,9 @@ impl EthCanBridge {
                             should_send_wire = true;
                             event_to_send = Some(CanFrameEvent {
                                 direction: "TX".to_string(),
-                                channel: if item.send_to_can2 {
+                                channel: if item.send_to_can1 && item.send_to_can2 {
+                                    "both".to_string()
+                                } else if item.send_to_can2 {
                                     "can2".to_string()
                                 } else {
                                     "can1".to_string()
@@ -606,7 +610,6 @@ impl EthCanBridge {
 
     fn parse_and_publish_rx(
         buf: &[u8; ANALYZER_RX_SIZE],
-        can_channel: &str,
         last_rx_id: &mut [u16; 2],
         last_rx_data: &mut [[u8; 8]; 2],
         last_rx_publish_time0: &mut Instant,
@@ -615,8 +618,10 @@ impl EthCanBridge {
     ) {
         let now = Instant::now();
 
+        // モジュール単位で CAN1 / CAN2 を個別に割り当てた場合でもフィードバックを受信できるよう、
+        // 60B パケットに含まれる CAN1 (0..9) と CAN2 (10..19) の両方を常に確認する
         // 1. CAN1 受信フレームの復元 (オフセット 0..9)
-        if can_channel == "can1" || can_channel == "both" {
+        {
             let can1_id = (((buf[0] as u16) << 8) | (buf[1] as u16)) & 0x7FF;
             if can1_id != 0 {
                 let mut current_data = [0u8; 8];
@@ -643,7 +648,7 @@ impl EthCanBridge {
         }
 
         // 2. CAN2 受信フレームの復元 (オフセット 10..19)
-        if can_channel == "can2" || can_channel == "both" {
+        {
             let can2_id = (((buf[10] as u16) << 8) | (buf[11] as u16)) & 0x7FF;
             if can2_id != 0 {
                 let mut current_data = [0u8; 8];

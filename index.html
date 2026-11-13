@@ -818,6 +818,15 @@
           <input type="text" id="modal-module-id" class="form-input" placeholder="例: 0x200">
         </div>
         <div class="form-group">
+          <label>CANチャンネル (Ethernet接続時)</label>
+          <select id="modal-module-channel" class="form-input">
+            <option value="default">全体設定に従う (デフォルト)</option>
+            <option value="can1">CAN1 のみ</option>
+            <option value="can2">CAN2 のみ</option>
+            <option value="both">CAN1 + CAN2 (両方)</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Description (説明文)</label>
           <input type="text" id="modal-module-desc" class="form-input" placeholder="例: 走行用左側モーター">
         </div>
