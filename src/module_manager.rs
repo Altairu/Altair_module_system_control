@@ -1111,8 +1111,14 @@ impl ModuleManager {
                                 };
                                 let (tx_id, slot, _) = robomas_can_ids(&param.motor_model, mid);
                                 let st = g.robomas_states.entry(m.name.clone()).or_default();
-                                let active_manual =
-                                    !st.force_stop && st.target.abs() > 0.0001;
+                                let eff_mode = st
+                                    .mode_override
+                                    .as_deref()
+                                    .unwrap_or(param.control_mode.as_str());
+                                let active_manual = !st.force_stop
+                                    && (st.target.abs() > 0.0001
+                                        || (eff_mode == "position_pid"
+                                            && st.feedback.angle_deg.abs() > 0.5));
                                 let should_send = is_running || active_manual;
                                 let out_i16 = if should_send {
                                     compute_robomas_output(&param, st, loop_start)
@@ -1209,6 +1215,111 @@ impl ModuleManager {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_robomas_id_and_can_mapping() {
+        assert_eq!(parse_robomas_motor_id("1", "m3508"), Some(1));
+        assert_eq!(parse_robomas_motor_id("0x203", "m3508"), Some(3));
+        assert_eq!(parse_robomas_motor_id("5", "gm6020"), Some(5));
+        assert_eq!(parse_robomas_motor_id("8", "gm6020"), None);
+
+        assert_eq!(robomas_can_ids("m3508", 1), (0x200, 0, 0x201));
+        assert_eq!(robomas_can_ids("m3508", 5), (0x1FF, 0, 0x205));
+        assert_eq!(robomas_can_ids("gm6020", 1), (0x1FF, 0, 0x205));
+        assert_eq!(robomas_can_ids("gm6020", 5), (0x2FF, 0, 0x209));
+    }
+
+    #[test]
+    fn test_robomas_tx_frame_aggregation_and_rx_decode() {
+        let tmp_cfg = std::env::temp_dir().join("altair_test_robomas_cfg.json");
+        let cfg = ModulesConfigFile {
+            control_rate_hz: 100,
+            modules: vec![
+                ModuleConfig {
+                    name: "RM1".to_string(),
+                    module_type: "robomas".to_string(),
+                    base_id: "1".to_string(),
+                    can_channel: Some("can1".to_string()),
+                    description: String::new(),
+                    parameters: None,
+                    robomas: Some(RobomasParam {
+                        motor_model: "m3508".to_string(),
+                        control_mode: "current".to_string(),
+                        ..Default::default()
+                    }),
+                },
+                ModuleConfig {
+                    name: "RM2".to_string(),
+                    module_type: "robomas".to_string(),
+                    base_id: "2".to_string(),
+                    can_channel: Some("can1".to_string()),
+                    description: String::new(),
+                    parameters: None,
+                    robomas: Some(RobomasParam {
+                        motor_model: "m2006".to_string(),
+                        control_mode: "speed_pid".to_string(),
+                        vel_kp: 10.0,
+                        vel_ki: 0.0,
+                        vel_kd: 0.0,
+                        ..Default::default()
+                    }),
+                },
+            ],
+        };
+        std::fs::write(&tmp_cfg, serde_json::to_string(&cfg).unwrap()).unwrap();
+
+        let sent_frames: Arc<Mutex<Vec<(u16, Vec<u8>, String)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let sent_clone = sent_frames.clone();
+        let (ws_tx, _) = broadcast::channel(16);
+
+        let mm = ModuleManager::new(
+            tmp_cfg.clone(),
+            Arc::new(move |id, data, ch, _| {
+                sent_clone
+                    .lock()
+                    .unwrap()
+                    .push((id, data.to_vec(), ch.to_string()));
+            }),
+            ws_tx,
+        );
+
+        // フィードバックRXのデコード確認 (ID 2 = 0x202, 角度=4096, 速度=100rpm, 電流=1638, 温度=35℃)
+        mm.handle_can_rx(&CanFrameEvent {
+            direction: "RX".to_string(),
+            channel: "can1".to_string(),
+            id: 0x202,
+            dlc: 8,
+            data: vec![0x10, 0x00, 0x00, 0x64, 0x06, 0x66, 35, 0],
+        });
+
+        // RM1に電流8192 (0x2000)、RM2に速度PID目標200rpm (偏差100 * Kp10 = 1000 = 0x03E8)
+        mm.set_robomas_command("RM1", 8192.0, Some("current"));
+        mm.set_robomas_command("RM2", 200.0, Some("speed_pid"));
+
+        // 制御ループが数周期回るのを待つ
+        std::thread::sleep(Duration::from_millis(50));
+
+        let captured = sent_frames.lock().unwrap().clone();
+        let _ = std::fs::remove_file(&tmp_cfg);
+
+        // 0x200 フレームが can1 宛てに、スロット0=0x2000 (8192), スロット1=0x03E8 (1000) で送信されているはず
+        let matched = captured.iter().find(|(id, data, ch)| {
+            *id == 0x200
+                && ch == "can1"
+                && data.len() == 8
+                && data[0] == 0x20
+                && data[1] == 0x00
+                && data[2] == 0x03
+                && data[3] == 0xE8
+        });
+        assert!(matched.is_some(), "captured frames: {:?}", captured);
     }
 }
 
