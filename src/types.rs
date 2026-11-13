@@ -53,7 +53,7 @@ pub struct RobomasParam {
     /// 速度PIDゲイン
     #[serde(default = "default_rm_vel_kp")]
     pub vel_kp: f64,
-    #[serde(default = "default_rm_vel_ki")]
+    #[serde(default)]
     pub vel_ki: f64,
     #[serde(default)]
     pub vel_kd: f64,
@@ -84,9 +84,6 @@ fn default_robomas_mode() -> String {
 fn default_rm_vel_kp() -> f64 {
     20.0
 }
-fn default_rm_vel_ki() -> f64 {
-    0.5
-}
 fn default_rm_pos_kp() -> f64 {
     3.0
 }
@@ -103,7 +100,7 @@ impl Default for RobomasParam {
             motor_model: default_robomas_model(),
             control_mode: default_robomas_mode(),
             vel_kp: default_rm_vel_kp(),
-            vel_ki: default_rm_vel_ki(),
+            vel_ki: 0.0,
             vel_kd: 0.0,
             pos_kp: default_rm_pos_kp(),
             pos_ki: 0.0,
