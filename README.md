@@ -7,9 +7,10 @@ Node.js や npm、ROS2 環境を必要とせず、Rust と Tauri v2 によって
 
 * Rust と Tauri v2 によるネイティブ構成のため、npm や Node.js が不要で、Windows 11 標準の WebView2 上で高精細かつ省メモリに動作します。
 * `self_update` クレートによる GitHub Releases 連携を内蔵しており、アプリ起動時に新バージョンを自動確認し、ワンクリックで最新版の `.exe` へ自己更新できます。
-* Ethernet-CAN 基板および USB-to-CAN の両方に対応し、GUI上でワンクリックで切り替えと接続ができます。
+* Ethernet-CAN 基板および USB-to-CAN の両方に対応し、GUI上でワンクリックで切り替えと接続ができます。Ethernet-CAN 利用時は、全体の送信チャンネルだけでなくモジュールごとに CAN1 / CAN2 / 両方 を個別に指定できます。
+* MDD、サーボ、電磁弁に加えて、DJI RoboMaster モーターの M3508 P19 / M2006 P36 / GM6020 に対応しています。電流 / 電圧指令、速度 PID、位置 PID のカスケード制御、多回転角度の積算とゼロ点リセットを行えます。
 * モジュール構成を JSON プロファイルとして保存や切り替え、インポート、エクスポートが可能です。
-* Google Blockly を用いたビジュアルプログラミングから Python コードを自動生成し、足回り運動学ブロックやゲームパッド連動を含む動作プログラムをそのまま実行できます。
+* Google Blockly を用いたビジュアルプログラミングから Python コードを自動生成し、足回り運動学ブロックやゲームパッド連動、RoboMaster モーター制御ブロックを含む動作プログラムをそのまま実行できます。
 
 ## システム構成
 
@@ -84,8 +85,25 @@ cargo build --release
 * 画面左側の Connection パネルで USB タブを選択します。
 * 自動探索にチェックを入れるか、COMポートを選択して Connect ボタンを押します。
 
+### モジュールの追加と CAN チャンネル設定
+
+* Dashboard 画面で Add Module を押すと、種別ごとに次の初期値が入力されます。
+  * MDD: 名前 `MDD1` / Base CAN ID `0x200`
+  * Servo: 名前 `Servo1` / Base CAN ID `0x100`
+  * Solenoid Valve: 名前 `SV1` / Base CAN ID `0x300`
+  * RoboMaster: 名前 `RM1` / モーター ID `1`
+* Ethernet-CAN 接続時は、左パネルの全体 CAN チャンネル設定に加えて、各モジュール設定で `全体設定に従う` / `CAN1` / `CAN2` / `両方` を個別に選択できます。
+
+### RoboMaster モーター制御
+
+* M3508 P19 / M2006 P36 / GM6020 に対応しており、同じ送信 CAN ID に属する複数モーターの指令値は自動で 8 バイトフレームに集約されます。
+  * M3508 / M2006: モーター ID 1〜4 は `0x200`、ID 5〜8 は `0x1FF` で電流指令を送信し、`0x201`〜`0x208` で受信します。
+  * GM6020: モーター ID 1〜4 は `0x1FF`、ID 5〜7 は `0x2FF` で電圧指令を送信し、`0x205`〜`0x20B` で受信します。
+* 制御モードは `current` / `voltage` / `speed_pid` / `position_pid` の 4 種類を選択できます。PID ゲインの初期値は P のみ有効で、I と D は `0.0` です (`vel_kp=20.0`, `pos_kp=3.0`)。
+* Python や Blockly からは `RobomasClient` の `set_target` / `set_current` / `set_voltage` / `set_speed` / `set_position` / `reset_zero` / `stop` / `get_feedback` を利用できます。
+
 ### モジュールの制御開始
 
-* Dashboard 画面で各MDDモジュールの制御モードやPIDゲインを設定します。
-* 左パネルの Send Params & Start ボタンを押すと、各モジュールへPIDゲインと制御モードが送信され、制御ループが開始されます。
+* Dashboard 画面で各モジュールの制御モードや PID ゲインを設定します。
+* 左パネルの Send Params & Start ボタンを押すと、各モジュールへパラメータと制御モードが送信され、制御ループが開始されます。
 * 各モジュールカード上部の UI操作送信 トグルをONにすると、スライダーやボタンの操作がリアルタイムにハードウェアへ送信されます。
