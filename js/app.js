@@ -107,8 +107,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 2. ビュー（画面）切り替えロジック ---
   el.menuItems.forEach(item => {
     item.addEventListener("click", (e) => {
-      e.preventDefault();
       const targetId = item.getAttribute("data-target");
+      if (!targetId) return; // 外部リンクなどの場合は画面切り替えを行わない
+      e.preventDefault();
 
       // メニューの活性状態をトグル
       el.menuItems.forEach(i => i.classList.remove("active"));
@@ -2560,6 +2561,15 @@ document.addEventListener("DOMContentLoaded", () => {
       window.open(url, "_blank");
     }
   }
+
+  // Sken 技術資料の案内リンククリックイベント
+  const SKEN_DOCS_URL = "https://altairu.github.io/sken_training_materials/";
+  document.querySelectorAll(".link-open-sken-docs, #btn-header-sken-docs, #link-sidebar-sken-docs, #btn-modal-open-sken").forEach(elBtn => {
+    elBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      openExternalUrl(SKEN_DOCS_URL);
+    });
+  });
 
   let updateTimerInterval = null;
 

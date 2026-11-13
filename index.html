@@ -58,6 +58,13 @@
         <a href="#" class="menu-item" data-target="view-logs">
           <i class="fa-solid fa-receipt"></i> System Logs
         </a>
+
+        <div style="margin: 8px 12px; border-top: 1px solid var(--border-light, #e0e0e0);"></div>
+
+        <a href="https://altairu.github.io/sken_training_materials/" target="_blank" rel="noopener noreferrer" class="menu-item link-open-sken-docs" id="link-sidebar-sken-docs" title="Sken 技術資料 (外部ブラウザで開く)">
+          <i class="fa-solid fa-book-open"></i> Sken 技術資料
+          <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 11px; margin-left: auto; opacity: 0.7;"></i>
+        </a>
       </nav>
 
       <div class="sidebar-footer" style="display: flex; flex-direction: column; gap: 8px;">
@@ -96,6 +103,12 @@
 
         <!-- 接続情報・非常停止ステータス -->
         <div class="header-status-panel">
+          <button class="btn btn-secondary link-open-sken-docs" id="btn-header-sken-docs" title="Sken 技術資料をブラウザで開く" style="display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; cursor: pointer;">
+            <i class="fa-solid fa-book-open"></i>
+            <span>Sken 技術資料</span>
+            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px; opacity: 0.7;"></i>
+          </button>
+
           <button class="btn btn-secondary btn-fullscreen" id="btn-fullscreen-toggle" title="全画面表示の切り替え">
             <i class="fa-solid fa-expand"></i> 全画面表示
           </button>
@@ -186,6 +199,16 @@
             </div>
             <div id="hint-can-rate-usb" style="display: none; font-size: 11px; color: #eab308; margin-top: 4px;">
               <i class="fa-solid fa-triangle-exclamation"></i> USB (slcan) は帯域の都合上 100Hz 推奨です
+            </div>
+
+            <!-- Sken 技術資料への案内リンク -->
+            <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 5px;">
+                <i class="fa-solid fa-circle-info" style="color: var(--color-primary);"></i> CAN仕様・配線:
+              </span>
+              <a href="https://altairu.github.io/sken_training_materials/" target="_blank" rel="noopener noreferrer" class="link-open-sken-docs" style="color: var(--color-primary); text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                Sken 技術資料 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px;"></i>
+              </a>
             </div>
           </div>
 
@@ -872,6 +895,20 @@
           <div style="font-weight: 600; margin-bottom: 6px;">接続ガイド (Ethernet-CAN)</div>
           <div>PC側IPアドレス: <code>192.168.2.100</code> / サブネットマスク: <code>255.255.255.0</code></div>
           <div>基板デフォルト接続先: <code>192.168.2.123 : 5000</code> (TCP Analyzer Mode)</div>
+        </div>
+        <div style="background: #f8f9fa; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+          <div style="font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <i class="fa-solid fa-book-open" style="color: var(--color-primary);"></i> Sken 技術資料
+            </span>
+            <button class="btn btn-primary btn-xs link-open-sken-docs" id="btn-modal-open-sken" style="font-size: 11px; padding: 2px 8px;">
+              <i class="fa-solid fa-arrow-up-right-from-square"></i> ブラウザで開く
+            </button>
+          </div>
+          <div>URL: <code>https://altairu.github.io/sken_training_materials/</code></div>
+          <p style="margin: 6px 0 0 0; color: var(--text-muted); font-size: 12px;">
+            Altair モジュールシステムや CAN 通信仕様、ロボット制御、STM32 開発などの公式技術資料・講習会テキストを閲覧できます。
+          </p>
         </div>
         <div style="background: #f8f9fa; border: 1px solid var(--border-light); border-radius: 8px; padding: 12px;">
           <div style="font-weight: 600; margin-bottom: 6px;">権利情報 / リポジトリ</div>
