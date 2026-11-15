@@ -4346,6 +4346,8 @@ if __name__ == '__main__':
       const toolboxDom = Blockly.utils.xml.textToDom(toolboxXml);
       blocklyWorkspace = Blockly.inject('blocklyDiv', {
         toolbox: toolboxDom,
+        media: '/js/vendor/media/',
+        sounds: false,
         scrollbars: true,
         trashcan: true,
         grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },

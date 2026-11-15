@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        Path, Query, State,
     },
     http::StatusCode,
     response::IntoResponse,
@@ -35,6 +35,15 @@ const GAMEPAD_JS: &str = include_str!("../js/gamepad.js");
 const BLOCKLY_JS: &str = include_str!("../js/vendor/blockly.min.js");
 const BLOCKLY_PYTHON_JS: &str = include_str!("../js/vendor/python_compressed.js");
 const BLOCKLY_JA_JS: &str = include_str!("../js/vendor/ja.js");
+const FONTAWESOME_CSS: &str = include_str!("../css/vendor/fontawesome-all.min.css");
+const FA_SOLID_WOFF2: &[u8] = include_bytes!("../css/webfonts/fa-solid-900.woff2");
+const FA_REGULAR_WOFF2: &[u8] = include_bytes!("../css/webfonts/fa-regular-400.woff2");
+const FA_BRANDS_WOFF2: &[u8] = include_bytes!("../css/webfonts/fa-brands-400.woff2");
+const MEDIA_SPRITES_SVG: &[u8] = include_bytes!("../js/vendor/media/sprites.svg");
+const MEDIA_1X1_GIF: &[u8] = include_bytes!("../js/vendor/media/1x1.gif");
+const MEDIA_HANDOPEN_CUR: &[u8] = include_bytes!("../js/vendor/media/handopen.cur");
+const MEDIA_HANDCLOSED_CUR: &[u8] = include_bytes!("../js/vendor/media/handclosed.cur");
+const MEDIA_HANDDELETE_CUR: &[u8] = include_bytes!("../js/vendor/media/handdelete.cur");
 
 /// 埋め込みファイルをキャッシュ無効で返す
 fn embedded_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
@@ -45,6 +54,22 @@ fn embedded_response(content_type: &'static str, body: &'static str) -> impl Int
         ],
         body,
     )
+}
+
+/// 埋め込みバイナリファイルを返す
+fn embedded_bytes_response(
+    content_type: &'static str,
+    body: &'static [u8],
+) -> axum::response::Response {
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 async fn serve_index_html() -> impl IntoResponse {
@@ -95,6 +120,30 @@ async fn serve_blockly_python_js() -> impl IntoResponse {
 
 async fn serve_blockly_ja_js() -> impl IntoResponse {
     embedded_response("application/javascript; charset=utf-8", BLOCKLY_JA_JS)
+}
+
+async fn serve_fontawesome_css() -> impl IntoResponse {
+    embedded_response("text/css; charset=utf-8", FONTAWESOME_CSS)
+}
+
+async fn serve_webfont(Path(file): Path<String>) -> axum::response::Response {
+    match file.as_str() {
+        "fa-solid-900.woff2" => embedded_bytes_response("font/woff2", FA_SOLID_WOFF2),
+        "fa-regular-400.woff2" => embedded_bytes_response("font/woff2", FA_REGULAR_WOFF2),
+        "fa-brands-400.woff2" => embedded_bytes_response("font/woff2", FA_BRANDS_WOFF2),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn serve_blockly_media(Path(file): Path<String>) -> axum::response::Response {
+    match file.as_str() {
+        "sprites.svg" => embedded_bytes_response("image/svg+xml", MEDIA_SPRITES_SVG),
+        "1x1.gif" => embedded_bytes_response("image/gif", MEDIA_1X1_GIF),
+        "handopen.cur" => embedded_bytes_response("image/x-icon", MEDIA_HANDOPEN_CUR),
+        "handclosed.cur" => embedded_bytes_response("image/x-icon", MEDIA_HANDCLOSED_CUR),
+        "handdelete.cur" => embedded_bytes_response("image/x-icon", MEDIA_HANDDELETE_CUR),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 use crate::behavior_runner::BehaviorRunner;
@@ -324,6 +373,9 @@ pub async fn start_altair_server(bind_ip: std::net::IpAddr, port: u16) -> Result
         .route("/js/vendor/blockly.min.js", get(serve_blockly_js))
         .route("/js/vendor/python_compressed.js", get(serve_blockly_python_js))
         .route("/js/vendor/ja.js", get(serve_blockly_ja_js))
+        .route("/js/vendor/media/:file", get(serve_blockly_media))
+        .route("/css/vendor/fontawesome-all.min.css", get(serve_fontawesome_css))
+        .route("/css/webfonts/:file", get(serve_webfont))
         .nest_service("/docs", ServeDir::new(project_root.join("docs")))
         // 全リクエストに Host / Origin 検証を掛けて、DNSリバインディングや
         // 外部サイトからのクロスサイトリクエスト (CSRF / WebSocket ハイジャック) を拒否する
