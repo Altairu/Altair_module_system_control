@@ -5,3 +5,6 @@ __pycache__/
 network_config.json
 .DS_Store
 *.zip
+# Antigravity Deck hooks
+.agents/hooks.json
+.agents/scripts/deck-hook.mjs

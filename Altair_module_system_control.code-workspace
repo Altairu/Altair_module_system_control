@@ -4,8 +4,13 @@
 			"path": "."
 		},
 		{
+			"path": "../altair_framework"
+		},
+		{
 			"path": "../Altair_module_system"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"stm32cube-ide-clangd.path": "cube"
+	}
 }
