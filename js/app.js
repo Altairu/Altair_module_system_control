@@ -110,54 +110,71 @@ document.addEventListener("DOMContentLoaded", () => {
   let blocklyWorkspace = null;
 
   // --- 2. ビュー（画面）切り替えロジック ---
+  function activateView(targetId) {
+    if (!targetId) return;
+
+    let activeMenuItem = null;
+    el.menuItems.forEach(i => {
+      if (i.getAttribute("data-target") === targetId) {
+        i.classList.add("active");
+        activeMenuItem = i;
+      } else {
+        i.classList.remove("active");
+      }
+    });
+
+    el.views.forEach(view => {
+      if (view.id === targetId) {
+        view.classList.add("active");
+        if (activeMenuItem && el.pageTitle) {
+          el.pageTitle.textContent = activeMenuItem.textContent.trim();
+        }
+      } else {
+        view.classList.remove("active");
+      }
+    });
+
+    // Automationタブが初めて開かれたときにBlocklyを遅延初期化してアプリ起動を高速化
+    if (targetId === "view-automation") {
+      if (typeof initBlocklyIfNeeded === "function") {
+        initBlocklyIfNeeded();
+      }
+      if (blocklyWorkspace && typeof Blockly !== "undefined") {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            Blockly.svgResize(blocklyWorkspace);
+          });
+        });
+      }
+    }
+
+    // CANログ画面を開いた際に最新の履歴・集計を即座に描画する
+    if (targetId === "view-logs") {
+      canLogState.pendingStreamEntries = [];
+      if (el.canStatTxCount) el.canStatTxCount.textContent = canLogState.txTotal;
+      if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
+      if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
+      renderCanSummaryTable();
+      rebuildCanStreamTerminals();
+    }
+
+    // テレメトリ画面を開いた際にモジュール選択肢を更新
+    if (targetId === "view-telemetry") {
+      updateScopeModuleSelect();
+    }
+
+    // Sken技術資料タブを開いた際に初回のみiframeを読み込む
+    if (targetId === "view-sken-docs" && typeof initSkenDocsIfNeeded === "function") {
+      initSkenDocsIfNeeded();
+    }
+  }
+
   el.menuItems.forEach(item => {
     item.addEventListener("click", (e) => {
       const targetId = item.getAttribute("data-target");
       if (!targetId) return; // 外部リンクなどの場合は画面切り替えを行わない
       e.preventDefault();
-
-      // メニューの活性状態をトグル
-      el.menuItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-
-      // ビューの表示をトグル
-      el.views.forEach(view => {
-        if (view.id === targetId) {
-          view.classList.add("active");
-          el.pageTitle.textContent = item.textContent.trim();
-        } else {
-          view.classList.remove("active");
-        }
-      });
-
-      // Automationタブが初めて開かれたときにBlocklyを遅延初期化してアプリ起動を高速化
-      if (targetId === "view-automation") {
-        if (typeof initBlocklyIfNeeded === "function") {
-          initBlocklyIfNeeded();
-        }
-        if (blocklyWorkspace && typeof Blockly !== "undefined") {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              Blockly.svgResize(blocklyWorkspace);
-            });
-          });
-        }
-      }
-
-      // CANログ画面を開いた際に最新の履歴・集計を即座に描画する
-      if (targetId === "view-logs") {
-        canLogState.pendingStreamEntries = [];
-        if (el.canStatTxCount) el.canStatTxCount.textContent = canLogState.txTotal;
-        if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
-        if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
-        renderCanSummaryTable();
-        rebuildCanStreamTerminals();
-      }
-
-      // テレメトリ画面を開いた際にモジュール選択肢を更新
-      if (targetId === "view-telemetry") {
-        updateScopeModuleSelect();
-      }
+      activateView(targetId);
     });
   });
 
@@ -3074,9 +3091,68 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Sken 技術資料の案内リンククリックイベント
+  // Sken 技術資料の埋め込みビュー制御・外部リンククリックイベント
   const SKEN_DOCS_URL = "https://altairu.github.io/sken_training_materials/";
-  document.querySelectorAll(".link-open-sken-docs, #btn-header-sken-docs, #link-sidebar-sken-docs, #btn-modal-open-sken").forEach(elBtn => {
+  const skenDocsIframe = document.getElementById("sken-docs-iframe");
+  const skenDocsStatus = document.getElementById("sken-docs-status");
+  const skenDocsStatusText = document.getElementById("sken-docs-status-text");
+  const btnSkenHome = document.getElementById("btn-sken-home");
+  const btnSkenReload = document.getElementById("btn-sken-reload");
+
+  function loadSkenDocsUrl(url) {
+    if (!skenDocsIframe) return;
+    if (skenDocsStatus && skenDocsStatusText) {
+      if (navigator.onLine === false) {
+        skenDocsStatusText.textContent = "オフラインのため技術資料を読み込めません。インターネット接続を確認してください。";
+      } else {
+        skenDocsStatusText.textContent = "Sken 技術資料を読み込み中です...";
+      }
+      skenDocsStatus.classList.add("visible");
+    }
+    skenDocsIframe.dataset.loaded = "true";
+    skenDocsIframe.src = url;
+  }
+
+  function initSkenDocsIfNeeded() {
+    if (!skenDocsIframe) return;
+    if (skenDocsIframe.dataset.loaded !== "true") {
+      loadSkenDocsUrl(SKEN_DOCS_URL);
+    }
+  }
+
+  if (skenDocsIframe) {
+    skenDocsIframe.addEventListener("load", () => {
+      if (skenDocsStatus) {
+        skenDocsStatus.classList.remove("visible");
+      }
+    });
+  }
+
+  if (btnSkenHome) {
+    btnSkenHome.addEventListener("click", () => {
+      loadSkenDocsUrl(SKEN_DOCS_URL);
+    });
+  }
+
+  if (btnSkenReload) {
+    btnSkenReload.addEventListener("click", () => {
+      if (!skenDocsIframe) return;
+      try {
+        skenDocsIframe.contentWindow.location.reload();
+      } catch (_) {
+        loadSkenDocsUrl(skenDocsIframe.src || SKEN_DOCS_URL);
+      }
+    });
+  }
+
+  document.querySelectorAll(".link-view-sken-docs").forEach(elBtn => {
+    elBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      activateView("view-sken-docs");
+    });
+  });
+
+  document.querySelectorAll(".link-open-sken-docs, #btn-modal-open-sken").forEach(elBtn => {
     elBtn.addEventListener("click", (e) => {
       e.preventDefault();
       openExternalUrl(SKEN_DOCS_URL);

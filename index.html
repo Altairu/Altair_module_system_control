@@ -52,9 +52,8 @@
 
         <div style="margin: 8px 12px; border-top: 1px solid var(--border-light, #e0e0e0);"></div>
 
-        <a href="https://altairu.github.io/sken_training_materials/" target="_blank" rel="noopener noreferrer" class="menu-item link-open-sken-docs" id="link-sidebar-sken-docs" title="Sken 技術資料 (外部ブラウザで開く)">
+        <a href="#" class="menu-item" data-target="view-sken-docs" id="link-sidebar-sken-docs" title="Sken 技術資料をアプリ内で開く">
           <i class="fa-solid fa-book-open"></i> Sken 技術資料
-          <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 11px; margin-left: auto; opacity: 0.7;"></i>
         </a>
       </nav>
 
@@ -94,10 +93,9 @@
 
         <!-- 接続情報・非常停止ステータス -->
         <div class="header-status-panel">
-          <button class="btn btn-secondary link-open-sken-docs" id="btn-header-sken-docs" title="Sken 技術資料をブラウザで開く" style="display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; cursor: pointer;">
+          <button class="btn btn-secondary link-view-sken-docs" id="btn-header-sken-docs" title="Sken 技術資料をアプリ内で開く" style="display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; cursor: pointer;">
             <i class="fa-solid fa-book-open"></i>
             <span>Sken 技術資料</span>
-            <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px; opacity: 0.7;"></i>
           </button>
 
           <button class="btn btn-secondary btn-fullscreen" id="btn-fullscreen-toggle" title="全画面表示の切り替え">
@@ -197,8 +195,8 @@
               <span style="display: flex; align-items: center; gap: 5px;">
                 <i class="fa-solid fa-circle-info" style="color: var(--color-primary);"></i> CAN仕様・配線:
               </span>
-              <a href="https://altairu.github.io/sken_training_materials/" target="_blank" rel="noopener noreferrer" class="link-open-sken-docs" style="color: var(--color-primary); text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 4px;">
-                Sken 技術資料 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 10px;"></i>
+              <a href="#" class="link-view-sken-docs" id="link-dashboard-sken-docs" style="color: var(--color-primary); text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                Sken 技術資料
               </a>
             </div>
           </div>
@@ -777,6 +775,36 @@
               </div>
               <div class="terminal-view can-terminal" id="can-logs-terminal"></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ビュー: Sken 技術資料 (埋め込みブラウザ) -->
+      <section id="view-sken-docs" class="content-view">
+        <div class="glass-card page-card sken-docs-card">
+          <div class="sken-docs-toolbar">
+            <div class="sken-docs-url-pill">
+              <i class="fa-solid fa-book-open" style="color: var(--color-primary);"></i>
+              <span>https://altairu.github.io/sken_training_materials/</span>
+            </div>
+            <div class="sken-docs-actions">
+              <button type="button" class="btn btn-secondary btn-xs" id="btn-sken-home" title="資料のトップページへ戻る">
+                <i class="fa-solid fa-house"></i> トップへ戻る
+              </button>
+              <button type="button" class="btn btn-secondary btn-xs" id="btn-sken-reload" title="資料を再読み込み">
+                <i class="fa-solid fa-rotate-right"></i> 再読み込み
+              </button>
+              <button type="button" class="btn btn-primary btn-xs link-open-sken-docs" id="btn-sken-open-external" title="外部ブラウザで開く">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> 外部ブラウザで開く
+              </button>
+            </div>
+          </div>
+          <div class="sken-docs-frame-wrap">
+            <div class="sken-docs-status" id="sken-docs-status">
+              <i class="fa-solid fa-spinner fa-spin"></i>
+              <span id="sken-docs-status-text">Sken 技術資料を読み込み中です...</span>
+            </div>
+            <iframe id="sken-docs-iframe" class="sken-docs-iframe" title="Sken 技術資料"></iframe>
           </div>
         </div>
       </section>
