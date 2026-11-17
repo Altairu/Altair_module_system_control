@@ -498,7 +498,7 @@ class AltairBehavior:
             pass
 
     def _load_config(self):
-        env_path = os.getenv("ALTAIR_MODULES_CONFIG")
+        env_path = os.getenv("ALTAIR_CONFIG_PATH") or os.getenv("ALTAIR_MODULES_CONFIG")
         this_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         paths = [
             env_path,

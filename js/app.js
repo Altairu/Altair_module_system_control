@@ -343,9 +343,103 @@ document.addEventListener("DOMContentLoaded", () => {
     return val >= 0x8000 ? val - 0x10000 : val;
   }
 
-  function resolveCanFrameInfo(idNum, bytes) {
+  function readInt16BE(bytes, offset) {
+    if (bytes.length < offset + 2) return 0;
+    const val = ((bytes[offset] & 0xFF) << 8) | (bytes[offset + 1] & 0xFF);
+    return val >= 0x8000 ? val - 0x10000 : val;
+  }
+
+  function parseRobomasCanIds(mod) {
+    const model = mod.robomas?.motor_model || "m3508";
+    const raw = String(mod.base_id || "").trim();
+    if (!raw) return null;
+    let mid = NaN;
+    if (raw.toLowerCase().startsWith("0x")) {
+      const hexVal = parseInt(raw, 16);
+      if (model === "gm6020") {
+        if (hexVal >= 0x205 && hexVal <= 0x20B) mid = hexVal - 0x204;
+        else if (hexVal >= 1 && hexVal <= 7) mid = hexVal;
+      } else {
+        if (hexVal >= 0x201 && hexVal <= 0x208) mid = hexVal - 0x200;
+        else if (hexVal >= 1 && hexVal <= 8) mid = hexVal;
+      }
+    } else {
+      mid = parseInt(raw, 10);
+    }
+    const maxId = model === "gm6020" ? 7 : 8;
+    if (isNaN(mid) || mid < 1 || mid > maxId) return null;
+    if (model === "gm6020") {
+      return {
+        mid,
+        model,
+        txId: mid <= 4 ? 0x1FF : 0x2FF,
+        slot: (mid - 1) % 4,
+        rxId: 0x204 + mid,
+      };
+    }
+    return {
+      mid,
+      model,
+      txId: mid <= 4 ? 0x200 : 0x1FF,
+      slot: (mid - 1) % 4,
+      rxId: 0x200 + mid,
+    };
+  }
+
+  function resolveCanFrameInfo(idNum, bytes, dir = "") {
     const modules = state.config?.modules || [];
+
+    // RoboMaster の RX フィードバックフレーム (0x201〜0x20B) を優先判定
+    if (dir !== "TX") {
+      for (const m of modules) {
+        if (m.type !== "robomas") continue;
+        const rm = parseRobomasCanIds(m);
+        if (!rm || idNum !== rm.rxId) continue;
+        let decoded = "";
+        if (bytes.length >= 6) {
+          const rawAngle = ((bytes[0] & 0xFF) << 8) | (bytes[1] & 0xFF);
+          const deg = ((rawAngle * 360.0) / 8192.0).toFixed(1);
+          const speedRpm = readInt16BE(bytes, 2);
+          const currentRaw = readInt16BE(bytes, 4);
+          const temp = bytes.length > 6 ? bytes[6] : 0;
+          decoded = `角度:${deg}° 速度:${speedRpm}rpm 電流:${currentRaw} 温度:${temp}℃`;
+        }
+        return {
+          moduleName: m.name,
+          label: `${m.name} / RMフィードバック(ID:${rm.mid})`,
+          decoded,
+        };
+      }
+    }
+
+    // RoboMaster の TX 集約指令フレーム (0x200 / 0x1FF / 0x2FF) を判定
+    if (dir !== "RX" && (idNum === 0x200 || idNum === 0x1FF || idNum === 0x2FF)) {
+      const matchedRm = [];
+      for (const m of modules) {
+        if (m.type !== "robomas") continue;
+        const rm = parseRobomasCanIds(m);
+        if (rm && rm.txId === idNum) {
+          matchedRm.push({ mod: m, rm });
+        }
+      }
+      if (matchedRm.length > 0) {
+        const names = matchedRm.map(x => x.mod.name).join(",");
+        let decoded = "";
+        if (bytes.length >= 8) {
+          decoded = matchedRm
+            .map(x => `${x.mod.name}:${readInt16BE(bytes, x.rm.slot * 2)}`)
+            .join(" ");
+        }
+        return {
+          moduleName: names,
+          label: `${names} / RM指令(0x${idNum.toString(16).toUpperCase()})`,
+          decoded,
+        };
+      }
+    }
+
     for (const m of modules) {
+      if (m.type === "robomas") continue;
       const baseId = parseInt(m.base_id, 16);
       if (isNaN(baseId)) continue;
 
@@ -433,7 +527,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const hexTokens = m[5].trim() ? m[5].trim().split(/\s+/) : [];
     const bytes = hexTokens.map(h => parseInt(h, 16) || 0);
     const timeStr = formatTimeWithMs(new Date());
-    const info = resolveCanFrameInfo(idNum, bytes);
+    const info = resolveCanFrameInfo(idNum, bytes, dir);
 
     return {
       dir,
@@ -457,7 +551,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (canLogState.filterId !== "ALL") {
       if (canLogState.filterId.startsWith("MOD:")) {
         const targetMod = canLogState.filterId.slice(4);
-        if (entry.moduleName !== targetMod) return false;
+        const modNames = entry.moduleName ? entry.moduleName.split(",") : [];
+        if (!modNames.includes(targetMod)) return false;
       } else if (entry.idHex !== canLogState.filterId) {
         return false;
       }
@@ -2872,7 +2967,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (slider) slider.value = 0;
         if (numInput) numInput.value = 0;
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-          state.ws.send(JSON.stringify({ type: "robomas_cmd", name: mod.name, target: 0, mode: "current" }));
+          const stopMode = mod.robomas?.motor_model === "gm6020" ? "voltage" : "current";
+          state.ws.send(JSON.stringify({ type: "robomas_cmd", name: mod.name, target: 0, mode: stopMode }));
         }
       }
     });

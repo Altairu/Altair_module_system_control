@@ -45,6 +45,39 @@ const MEDIA_HANDOPEN_CUR: &[u8] = include_bytes!("../js/vendor/media/handopen.cu
 const MEDIA_HANDCLOSED_CUR: &[u8] = include_bytes!("../js/vendor/media/handclosed.cur");
 const MEDIA_HANDDELETE_CUR: &[u8] = include_bytes!("../js/vendor/media/handdelete.cur");
 
+// self_update で .exe のみ差し替わった場合でも Python 実行基盤が古いまま残らないよう埋め込む
+const PY_ALTAIR_CORE_INIT: &str = include_str!("../altair_core/__init__.py");
+const PY_ALTAIR_BASE_BEHAVIOR: &str = include_str!("../altair_core/base_behavior.py");
+const PY_RCLPY_INIT: &str = include_str!("../rclpy/__init__.py");
+
+/// 配布環境で実行基盤の Python ファイルが未配置または古い場合に最新へ同期する
+fn sync_embedded_python_runtime(project_root: &std::path::Path) {
+    // リポジトリ直下で開発中の場合はローカル編集を上書きしない
+    if project_root.join("Cargo.toml").exists() {
+        return;
+    }
+    let files = [
+        ("altair_core/__init__.py", PY_ALTAIR_CORE_INIT),
+        ("altair_core/base_behavior.py", PY_ALTAIR_BASE_BEHAVIOR),
+        ("rclpy/__init__.py", PY_RCLPY_INIT),
+    ];
+    for (rel_path, content) in files {
+        let dest = project_root.join(rel_path);
+        if let Some(parent) = dest.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let needs_write = match fs::read_to_string(&dest) {
+            Ok(existing) => existing != content,
+            Err(_) => true,
+        };
+        if needs_write {
+            if let Err(e) = fs::write(&dest, content) {
+                eprintln!("[WARN] Pythonランタイム同期に失敗 ({}): {}", rel_path, e);
+            }
+        }
+    }
+}
+
 /// 埋め込みファイルをキャッシュ無効で返す
 fn embedded_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
     (
@@ -188,6 +221,7 @@ pub fn resolve_project_root() -> PathBuf {
 /// HTTP REST API + WebSocket サーバーを起動
 pub async fn start_altair_server(bind_ip: std::net::IpAddr, port: u16) -> Result<AppState, String> {
     let project_root = resolve_project_root();
+    sync_embedded_python_runtime(&project_root);
     let config_path = project_root.join("config").join("modules_config.json");
     let profiles_dir = project_root.join("profiles");
     let network_config_path = project_root.join("network_config.json");
