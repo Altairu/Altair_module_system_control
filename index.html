@@ -750,6 +750,107 @@
             </div>
           </div>
 
+          <!-- 中段: 汎用 CAN 簡易モニター & テスト送信 (折りたたみ可) -->
+          <details class="can-custom-panel mt-3" id="can-custom-panel">
+            <summary class="can-custom-summary">
+              <span><i class="fa-solid fa-microchip"></i> 汎用 CAN 簡易モニター & テスト送信 (新センサー / 自作基板向け)</span>
+              <span class="can-custom-hint">クリックで展開・折りたたみ</span>
+            </summary>
+            <div class="can-custom-body">
+              <div class="can-custom-grid">
+                <!-- 受信ウォッチ設定 & 表示 -->
+                <div class="can-custom-box">
+                  <div class="can-custom-box-title">
+                    <i class="fa-solid fa-eye"></i> 受信データ 簡易ウォッチ
+                  </div>
+                  <div class="can-watch-form">
+                    <input type="text" id="can-watch-name" class="form-input form-input-xs" placeholder="名前 (例: ToF1)" value="Sensor1">
+                    <input type="text" id="can-watch-id" class="form-input form-input-xs" placeholder="CAN ID (例: 0x410)" value="0x410" style="width: 88px;">
+                    <select id="can-watch-offset" class="form-input form-input-xs" style="width: 72px;" title="開始バイト位置">
+                      <option value="0">byte[0]</option>
+                      <option value="1">byte[1]</option>
+                      <option value="2">byte[2]</option>
+                      <option value="3">byte[3]</option>
+                      <option value="4">byte[4]</option>
+                      <option value="5">byte[5]</option>
+                      <option value="6">byte[6]</option>
+                      <option value="7">byte[7]</option>
+                    </select>
+                    <select id="can-watch-dtype" class="form-input form-input-xs" style="width: 118px;" title="データ型">
+                      <option value="uint8">uint8</option>
+                      <option value="int8">int8</option>
+                      <option value="uint16_le">uint16 (LE)</option>
+                      <option value="int16_le" selected>int16 (LE)</option>
+                      <option value="uint16_be">uint16 (BE)</option>
+                      <option value="int16_be">int16 (BE)</option>
+                      <option value="uint32_le">uint32 (LE)</option>
+                      <option value="int32_le">int32 (LE)</option>
+                      <option value="uint32_be">uint32 (BE)</option>
+                      <option value="int32_be">int32 (BE)</option>
+                      <option value="float32_le">float32 (LE)</option>
+                      <option value="float32_be">float32 (BE)</option>
+                      <option value="bit0">bit[0]</option>
+                      <option value="bit1">bit[1]</option>
+                      <option value="bit2">bit[2]</option>
+                      <option value="bit3">bit[3]</option>
+                      <option value="bit4">bit[4]</option>
+                      <option value="bit5">bit[5]</option>
+                      <option value="bit6">bit[6]</option>
+                      <option value="bit7">bit[7]</option>
+                    </select>
+                    <input type="number" id="can-watch-scale" class="form-input form-input-xs" step="any" value="1" placeholder="倍率" style="width: 68px;" title="倍率 (例: 0.1)">
+                    <input type="text" id="can-watch-unit" class="form-input form-input-xs" placeholder="単位" style="width: 58px;" title="単位 (例: mm)">
+                    <button type="button" class="btn btn-primary btn-xs" id="btn-add-can-watch">追加</button>
+                  </div>
+                  <div class="can-watch-table-wrap">
+                    <table class="can-summary-table">
+                      <thead>
+                        <tr>
+                          <th>名前</th>
+                          <th>ID</th>
+                          <th>形式</th>
+                          <th style="text-align: right;">最新値</th>
+                          <th style="width: 44px;"></th>
+                        </tr>
+                      </thead>
+                      <tbody id="can-watch-tbody">
+                        <tr class="can-empty-row">
+                          <td colspan="5">監視ルールを追加すると、受信フレームを数値変換して表示します。</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- テスト送信 -->
+                <div class="can-custom-box">
+                  <div class="can-custom-box-title">
+                    <i class="fa-solid fa-paper-plane"></i> 任意 CAN フレーム テスト送信
+                  </div>
+                  <div class="can-tx-test-form">
+                    <div class="can-tx-test-row">
+                      <label>CAN ID</label>
+                      <input type="text" id="can-test-id" class="form-input form-input-xs" value="0x400" placeholder="0x400" style="width: 90px;">
+                      <label>チャンネル</label>
+                      <select id="can-test-channel" class="form-input form-input-xs" style="width: 110px;">
+                        <option value="default">全体設定</option>
+                        <option value="can1">CAN1</option>
+                        <option value="can2">CAN2</option>
+                        <option value="both">両方</option>
+                      </select>
+                    </div>
+                    <div class="can-tx-test-row">
+                      <label>バイト列 (HEX / スペース区切り, 最大8B)</label>
+                      <input type="text" id="can-test-bytes" class="form-input form-input-xs" value="00 00 00 00 00 00 00 00" placeholder="例: 01 FF 0A 00" style="flex: 1; font-family: 'Consolas', monospace;">
+                      <button type="button" class="btn btn-primary btn-xs" id="btn-send-test-can">1回送信</button>
+                    </div>
+                    <div id="can-test-status" class="can-test-status"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
           <!-- 下段: 時系列ストリームログ (送受信2分割 または 統合表示) -->
           <div id="can-stream-container" class="can-stream-split mt-3">
             <!-- TX ストリームパネル -->

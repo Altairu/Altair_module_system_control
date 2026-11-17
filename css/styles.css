@@ -2070,3 +2070,108 @@ body {
 .sken-docs-status.visible {
   display: flex;
 }
+
+/* --- 汎用 CAN 簡易モニター & テスト送信 --- */
+.can-custom-panel {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-subtle, #f8f9fa);
+  overflow: hidden;
+}
+
+.can-custom-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  user-select: none;
+}
+
+.can-custom-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.can-custom-body {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-light);
+  background: #ffffff;
+}
+
+.can-custom-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .can-custom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.can-custom-box {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fafbfc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.can-custom-box-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.can-watch-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.form-input-xs {
+  padding: 4px 8px;
+  font-size: 12px;
+  height: 28px;
+}
+
+.can-watch-table-wrap {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.can-tx-test-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.can-tx-test-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.can-test-status {
+  font-size: 11px;
+  min-height: 16px;
+  color: var(--text-muted);
+}

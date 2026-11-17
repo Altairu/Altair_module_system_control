@@ -11,7 +11,7 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -197,6 +197,9 @@ pub struct AppState {
     pub behavior_runner: BehaviorRunner,
     pub ws_tx: broadcast::Sender<WsEvent>,
     pub can_log_tx: broadcast::Sender<WsEvent>,
+    pub rx_tx: broadcast::Sender<CanFrameEvent>,
+    pub latest_can_rx: Arc<Mutex<HashMap<u16, CanFrameEvent>>>,
+    pub send_can_fn: Arc<dyn Fn(u16, &[u8], &str, bool) + Send + Sync>,
 }
 
 /// 実行ファイルまたはカレントディレクトリからプロジェクトルートを自動検出
@@ -257,31 +260,39 @@ pub async fn start_altair_server(bind_ip: std::net::IpAddr, port: u16) -> Result
     let usb_for_send = usb_bridge.clone();
     let mode_for_send = active_mode.clone();
 
-    let send_can_fn = Arc::new(move |id: u16, data: &[u8], channel: &str, is_config: bool| {
-        let mode = mode_for_send.lock().unwrap().clone();
-        if mode == "usb" {
-            usb_for_send.send_can_frame(id, data);
-        } else {
-            eth_for_send.send_can_frame(id, data, channel, is_config);
-        }
-    });
+    let send_can_fn: Arc<dyn Fn(u16, &[u8], &str, bool) + Send + Sync> =
+        Arc::new(move |id: u16, data: &[u8], channel: &str, is_config: bool| {
+            let mode = mode_for_send.lock().unwrap().clone();
+            if mode == "usb" {
+                usb_for_send.send_can_frame(id, data);
+            } else {
+                eth_for_send.send_can_frame(id, data, channel, is_config);
+            }
+        });
 
-    let module_manager = ModuleManager::new(config_path.clone(), send_can_fn, ws_tx.clone());
+    let module_manager =
+        ModuleManager::new(config_path.clone(), send_can_fn.clone(), ws_tx.clone());
     let behavior_runner = BehaviorRunner::new(
         project_root.clone(),
         config_path.clone(),
         port,
         ws_tx.clone(),
     );
+    let latest_can_rx: Arc<Mutex<HashMap<u16, CanFrameEvent>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
-    // CAN RX/TX イベント購読タスク (ModuleManager への通知 + WebUI CANログ配信)
+    // CAN RX/TX イベント購読タスク (ModuleManager への通知 + 最新RXキャッシュ + WebUI CANログ配信)
     {
         let mut rx_sub = rx_tx.subscribe();
         let mm = module_manager.clone();
         let can_log_tx_clone = can_log_tx.clone();
+        let latest_rx_clone = latest_can_rx.clone();
         tokio::spawn(async move {
             while let Ok(frame) = rx_sub.recv().await {
                 if frame.direction == "RX" {
+                    if let Ok(mut map) = latest_rx_clone.lock() {
+                        map.insert(frame.id, frame.clone());
+                    }
                     mm.handle_can_rx(&frame);
                 }
 
@@ -358,6 +369,9 @@ pub async fn start_altair_server(bind_ip: std::net::IpAddr, port: u16) -> Result
         behavior_runner,
         ws_tx,
         can_log_tx,
+        rx_tx,
+        latest_can_rx,
+        send_can_fn,
     };
 
     let app = Router::new()
@@ -1224,10 +1238,36 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_ws_client(socket, state, filter))
 }
 
+fn parse_standard_can_id(v: Option<&Value>) -> Option<u16> {
+    let val = v?;
+    let raw = if let Some(n) = val.as_u64() {
+        n
+    } else if let Some(s) = val.as_str() {
+        let trimmed = s.trim();
+        if let Some(hex) = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+        {
+            u64::from_str_radix(hex, 16).ok()?
+        } else {
+            trimmed.parse::<u64>().ok()?
+        }
+    } else {
+        return None;
+    };
+    if (1..=0x7FF).contains(&raw) {
+        Some(raw as u16)
+    } else {
+        None
+    }
+}
+
 async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
     let is_behavior_client = filter == "behavior";
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.ws_tx.subscribe();
+    let subscribed_can_ids: Arc<Mutex<HashSet<u16>>> = Arc::new(Mutex::new(HashSet::new()));
+    let (direct_tx, mut direct_rx) = tokio::sync::mpsc::channel::<WsEvent>(256);
 
     // 初回接続時に現在のCANステータスとBehaviorステータスを送信
     {
@@ -1247,19 +1287,68 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
         }
     }
 
+    let mm = state.module_manager.clone();
+    let ws_tx = state.ws_tx.clone();
+    let send_can_fn = state.send_can_fn.clone();
+    let eth_bridge = state.eth_bridge.clone();
+    let latest_can_rx = state.latest_can_rx.clone();
+    let subscribed_for_send = subscribed_can_ids.clone();
+
     let send_task = tokio::spawn(async move {
         let is_behavior = filter == "behavior";
         let mut last_mdd_feedback_sent = tokio::time::Instant::now();
         let mut last_robomas_feedback_sent: std::collections::HashMap<String, tokio::time::Instant> =
             std::collections::HashMap::new();
+        let mut last_can_rx_sent: std::collections::HashMap<u16, tokio::time::Instant> =
+            std::collections::HashMap::new();
 
         if is_behavior {
-            // Python Behavior クライアント: 生CANログは購読せず、制御/ゲームパッド/フィードバックのみを超低遅延で配信
+            // Python Behavior クライアント: 制御/ゲームパッド/フィードバック + 購読要求されたCAN RXのみ配信
+            let mut can_rx_sub = state.rx_tx.subscribe();
             loop {
-                let ev = match rx.recv().await {
-                    Ok(ev) => ev,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                let ev = tokio::select! {
+                    res = rx.recv() => {
+                        match res {
+                            Ok(ev) => ev,
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                    maybe_direct = direct_rx.recv() => {
+                        match maybe_direct {
+                            Some(ev) => ev,
+                            None => break,
+                        }
+                    }
+                    res = can_rx_sub.recv() => {
+                        let frame = match res {
+                            Ok(f) => f,
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        };
+                        if frame.direction != "RX" {
+                            continue;
+                        }
+                        let is_subscribed = subscribed_for_send
+                            .lock()
+                            .map(|s| s.contains(&frame.id))
+                            .unwrap_or(false);
+                        if !is_subscribed {
+                            continue;
+                        }
+                        let now = tokio::time::Instant::now();
+                        if let Some(prev) = last_can_rx_sent.get(&frame.id) {
+                            if now.duration_since(*prev) < Duration::from_millis(2) {
+                                continue;
+                            }
+                        }
+                        last_can_rx_sent.insert(frame.id, now);
+                        WsEvent::CanRxFrame {
+                            id: frame.id,
+                            data: frame.data,
+                            channel: frame.channel,
+                        }
+                    }
                 };
                 match &ev {
                     WsEvent::RawCanFrame { .. } => continue,
@@ -1322,14 +1411,52 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
         }
     });
 
-    let mm = state.module_manager.clone();
-    let ws_tx = state.ws_tx.clone();
-
     while let Some(Ok(msg)) = receiver.next().await {
         if let Message::Text(text) = msg {
             if let Ok(val) = serde_json::from_str::<Value>(&text) {
                 let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 match msg_type {
+                    "raw_can_tx" => {
+                        if let Some(can_id) = parse_standard_can_id(val.get("id")) {
+                            let bytes: Vec<u8> = val
+                                .get("data")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .take(8)
+                                        .map(|x| x.as_u64().unwrap_or(0).min(255) as u8)
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let req_ch = val
+                                .get("channel")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("default")
+                                .trim()
+                                .to_ascii_lowercase();
+                            let eff_ch = match req_ch.as_str() {
+                                "can1" | "can2" | "both" => req_ch,
+                                _ => eth_bridge.get_config().2,
+                            };
+                            (send_can_fn)(can_id, &bytes, &eff_ch, false);
+                        }
+                    }
+                    "subscribe_can_id" => {
+                        if let Some(can_id) = parse_standard_can_id(val.get("id")) {
+                            if let Ok(mut set) = subscribed_can_ids.lock() {
+                                set.insert(can_id);
+                            }
+                            if let Ok(map) = latest_can_rx.lock() {
+                                if let Some(frame) = map.get(&can_id) {
+                                    let _ = direct_tx.try_send(WsEvent::CanRxFrame {
+                                        id: frame.id,
+                                        data: frame.data.clone(),
+                                        channel: frame.channel.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
                     "mdd_cmd" => {
                         let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         if let Some(arr) = val.get("targets").and_then(|v| v.as_array()) {

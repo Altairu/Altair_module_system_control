@@ -155,6 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (el.canStatRxCount) el.canStatRxCount.textContent = canLogState.rxTotal;
       if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
       renderCanSummaryTable();
+      renderCanWatchTable();
       rebuildCanStreamTerminals();
     }
 
@@ -366,6 +367,121 @@ document.addEventListener("DOMContentLoaded", () => {
     return val >= 0x8000 ? val - 0x10000 : val;
   }
 
+  function escapeHtmlSimple(str) {
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function parseStandardCanIdInput(raw) {
+    const s = String(raw ?? "").trim();
+    if (!s) return null;
+    let num = NaN;
+    if (/^0x[0-9a-f]+$/i.test(s)) {
+      num = parseInt(s, 16);
+    } else if (/^\d+$/.test(s)) {
+      num = parseInt(s, 10);
+    }
+    if (!Number.isInteger(num) || num < 1 || num > 0x7FF) return null;
+    return num;
+  }
+
+  function decodeCanBytesBySpec(bytes, offset, dtype, scale = 1.0) {
+    const off = parseInt(offset, 10);
+    if (isNaN(off) || off < 0 || off > 7) return null;
+    const dt = String(dtype || "uint8").toLowerCase();
+    if (dt.startsWith("bit")) {
+      const bitIdx = parseInt(dt.slice(3), 10);
+      if (isNaN(bitIdx) || bitIdx < 0 || bitIdx > 7 || bytes.length <= off) return null;
+      return ((bytes[off] >> bitIdx) & 1) !== 0 ? "ON (1)" : "OFF (0)";
+    }
+
+    const sizeMap = {
+      uint8: 1, int8: 1,
+      uint16_le: 2, int16_le: 2, uint16_be: 2, int16_be: 2,
+      uint32_le: 4, int32_le: 4, uint32_be: 4, int32_be: 4,
+      float32_le: 4, float32_be: 4,
+    };
+    const size = sizeMap[dt];
+    if (!size || bytes.length < off + size) return null;
+
+    const buf = new ArrayBuffer(size);
+    const u8 = new Uint8Array(buf);
+    for (let i = 0; i < size; i++) {
+      u8[i] = (bytes[off + i] || 0) & 0xFF;
+    }
+    const dv = new DataView(buf);
+    let rawVal = 0;
+    switch (dt) {
+      case "uint8": rawVal = dv.getUint8(0); break;
+      case "int8": rawVal = dv.getInt8(0); break;
+      case "uint16_le": rawVal = dv.getUint16(0, true); break;
+      case "int16_le": rawVal = dv.getInt16(0, true); break;
+      case "uint16_be": rawVal = dv.getUint16(0, false); break;
+      case "int16_be": rawVal = dv.getInt16(0, false); break;
+      case "uint32_le": rawVal = dv.getUint32(0, true); break;
+      case "int32_le": rawVal = dv.getInt32(0, true); break;
+      case "uint32_be": rawVal = dv.getUint32(0, false); break;
+      case "int32_be": rawVal = dv.getInt32(0, false); break;
+      case "float32_le": rawVal = dv.getFloat32(0, true); break;
+      case "float32_be": rawVal = dv.getFloat32(0, false); break;
+      default: return null;
+    }
+    if (!Number.isFinite(rawVal)) return null;
+    const sc = Number(scale);
+    const scaled = rawVal * (Number.isFinite(sc) ? sc : 1.0);
+    if (Number.isInteger(scaled)) return String(scaled);
+    return scaled.toFixed(3).replace(/\.?0+$/, "");
+  }
+
+  const CAN_WATCH_STORAGE_KEY = "altair_custom_can_watch_rules_v1";
+  const canWatchState = {
+    rules: [],
+    latestRx: new Map(), // idNum -> bytes[]
+  };
+  try {
+    const savedWatch = localStorage.getItem(CAN_WATCH_STORAGE_KEY);
+    if (savedWatch) {
+      const parsed = JSON.parse(savedWatch);
+      if (Array.isArray(parsed)) {
+        canWatchState.rules = parsed.filter(r => r && Number.isInteger(r.idNum));
+      }
+    }
+  } catch (_) {}
+
+  function saveCanWatchRules() {
+    try {
+      localStorage.setItem(CAN_WATCH_STORAGE_KEY, JSON.stringify(canWatchState.rules));
+    } catch (_) {}
+  }
+
+  function renderCanWatchTable() {
+    const tbody = document.getElementById("can-watch-tbody");
+    if (!tbody) return;
+    if (canWatchState.rules.length === 0) {
+      tbody.innerHTML = `<tr class="can-empty-row"><td colspan="5">監視ルールを追加すると、受信フレームを数値変換して表示します。</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = canWatchState.rules.map((r, idx) => {
+      const idHex = `0x${r.idNum.toString(16).toUpperCase().padStart(3, "0")}`;
+      const bytes = canWatchState.latestRx.get(r.idNum);
+      const valStr = bytes ? decodeCanBytesBySpec(bytes, r.offset, r.dtype, r.scale) : null;
+      const disp = valStr !== null ? `${valStr}${r.unit ? " " + escapeHtmlSimple(r.unit) : ""}` : "未受信";
+      return `
+        <tr>
+          <td style="font-weight:600;">${escapeHtmlSimple(r.name)}</td>
+          <td><span class="can-id-badge">${idHex}</span></td>
+          <td style="font-size:11px; color:var(--text-muted);">byte[${r.offset}] ${escapeHtmlSimple(r.dtype)} ×${r.scale}</td>
+          <td style="text-align:right; font-family:'Consolas', monospace; font-weight:600;">${disp}</td>
+          <td style="text-align:center;">
+            <button type="button" class="btn btn-secondary btn-xs btn-del-can-watch" data-idx="${idx}" title="削除" style="padding:2px 6px;">&times;</button>
+          </td>
+        </tr>`;
+    }).join("");
+  }
+
   function parseRobomasCanIds(mod) {
     const model = mod.robomas?.motor_model || "m3508";
     const raw = String(mod.base_id || "").trim();
@@ -528,6 +644,20 @@ document.addEventListener("DOMContentLoaded", () => {
           decoded: onList.length > 0 ? `ON: ${onList.join(",")}` : "すべてOFF",
         };
       }
+    }
+
+    const matchedWatches = canWatchState.rules.filter(r => r.idNum === idNum);
+    if (matchedWatches.length > 0) {
+      const names = matchedWatches.map(r => r.name).join(",");
+      const decodedList = matchedWatches.map(r => {
+        const v = decodeCanBytesBySpec(bytes, r.offset, r.dtype, r.scale);
+        return v !== null ? `${r.name}:${v}${r.unit || ""}` : `${r.name}:-`;
+      });
+      return {
+        moduleName: names,
+        label: `${names} / 汎用CAN`,
+        decoded: decodedList.join(" "),
+      };
     }
 
     return { moduleName: "", label: "未登録ID", decoded: "" };
@@ -741,6 +871,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (el.canStatIdCount) el.canStatIdCount.textContent = canLogState.knownIds.size;
 
     renderCanSummaryTable();
+    renderCanWatchTable();
 
     if (canLogState.pendingStreamEntries.length > 0) {
       const batch = canLogState.pendingStreamEntries;
@@ -778,6 +909,7 @@ document.addEventListener("DOMContentLoaded", () => {
       canLogState.txTotal++;
     } else {
       canLogState.rxTotal++;
+      canWatchState.latestRx.set(entry.idNum, entry.bytes);
     }
 
     if (!canLogState.knownIds.has(entry.idHex)) {
@@ -886,6 +1018,95 @@ document.addEventListener("DOMContentLoaded", () => {
       rebuildCanStreamTerminals();
     });
   }
+
+  // 汎用 CAN ウォッチ追加・削除 & テスト送信
+  const btnAddCanWatch = document.getElementById("btn-add-can-watch");
+  const canWatchTbody = document.getElementById("can-watch-tbody");
+  const btnSendTestCan = document.getElementById("btn-send-test-can");
+
+  if (btnAddCanWatch) {
+    btnAddCanWatch.addEventListener("click", () => {
+      const nameEl = document.getElementById("can-watch-name");
+      const idEl = document.getElementById("can-watch-id");
+      const offEl = document.getElementById("can-watch-offset");
+      const dtypeEl = document.getElementById("can-watch-dtype");
+      const scaleEl = document.getElementById("can-watch-scale");
+      const unitEl = document.getElementById("can-watch-unit");
+
+      const idNum = parseStandardCanIdInput(idEl?.value);
+      if (idNum === null) {
+        alert("CAN ID は 0x001〜0x7FF (または 1〜2047) の範囲で入力してください。");
+        return;
+      }
+      const name = (nameEl?.value || "").trim() || `CAN_0x${idNum.toString(16).toUpperCase()}`;
+      const offset = parseInt(offEl?.value || "0", 10) || 0;
+      const dtype = dtypeEl?.value || "int16_le";
+      const scaleVal = parseFloat(scaleEl?.value || "1");
+      const scale = Number.isFinite(scaleVal) ? scaleVal : 1.0;
+      const unit = (unitEl?.value || "").trim();
+
+      canWatchState.rules.push({ name, idNum, offset, dtype, scale, unit });
+      saveCanWatchRules();
+      renderCanWatchTable();
+      renderCanSummaryTable();
+    });
+  }
+
+  if (canWatchTbody) {
+    canWatchTbody.addEventListener("click", (e) => {
+      const btn = e.target.closest(".btn-del-can-watch");
+      if (!btn) return;
+      const idx = parseInt(btn.getAttribute("data-idx"), 10);
+      if (!isNaN(idx) && idx >= 0 && idx < canWatchState.rules.length) {
+        canWatchState.rules.splice(idx, 1);
+        saveCanWatchRules();
+        renderCanWatchTable();
+        renderCanSummaryTable();
+      }
+    });
+  }
+
+  if (btnSendTestCan) {
+    btnSendTestCan.addEventListener("click", () => {
+      const idEl = document.getElementById("can-test-id");
+      const chEl = document.getElementById("can-test-channel");
+      const bytesEl = document.getElementById("can-test-bytes");
+      const statusEl = document.getElementById("can-test-status");
+
+      const idNum = parseStandardCanIdInput(idEl?.value);
+      if (idNum === null) {
+        if (statusEl) statusEl.textContent = "エラー: CAN ID は 0x001〜0x7FF の範囲で指定してください。";
+        return;
+      }
+      const rawTokens = (bytesEl?.value || "").trim().split(/[\s,]+/).filter(Boolean);
+      const data = [];
+      for (const tok of rawTokens.slice(0, 8)) {
+        const b = /^[0-9a-f]{1,2}$/i.test(tok) ? parseInt(tok, 16) : parseInt(tok, 0);
+        if (isNaN(b) || b < 0 || b > 255) {
+          if (statusEl) statusEl.textContent = `エラー: 無効なバイト値 '${tok}' (00〜FF で指定してください)`;
+          return;
+        }
+        data.push(b);
+      }
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        if (statusEl) statusEl.textContent = "エラー: バックエンド WebSocket が未接続です。";
+        return;
+      }
+      const channel = chEl?.value || "default";
+      state.ws.send(JSON.stringify({
+        type: "raw_can_tx",
+        id: idNum,
+        data,
+        channel,
+      }));
+      const hexDisp = data.map(b => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+      if (statusEl) {
+        statusEl.textContent = `送信完了: ID=0x${idNum.toString(16).toUpperCase().padStart(3, "0")} [${data.length}] ${hexDisp}`;
+      }
+    });
+  }
+
+  renderCanWatchTable();
 
   // 一時停止 / 再開ボタン
   if (el.btnPauseCanLogs) {
@@ -3735,6 +3956,119 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  const CAN_DTYPE_DROPDOWN = [
+    ["uint8 (符号なし1B)", "uint8"],
+    ["int8 (符号あり1B)", "int8"],
+    ["uint16 LE (符号なし2B)", "uint16_le"],
+    ["int16 LE (符号あり2B)", "int16_le"],
+    ["uint16 BE (BigEndian)", "uint16_be"],
+    ["int16 BE (BigEndian)", "int16_be"],
+    ["uint32 LE (符号なし4B)", "uint32_le"],
+    ["int32 LE (符号あり4B)", "int32_le"],
+    ["uint32 BE (BigEndian)", "uint32_be"],
+    ["int32 BE (BigEndian)", "int32_be"],
+    ["float32 LE (単精度浮動小数)", "float32_le"],
+    ["float32 BE (BigEndian)", "float32_be"],
+  ];
+
+  const CAN_BYTE_OFFSET_DROPDOWN = [
+    ["byte[0]", "0"], ["byte[1]", "1"], ["byte[2]", "2"], ["byte[3]", "3"],
+    ["byte[4]", "4"], ["byte[5]", "5"], ["byte[6]", "6"], ["byte[7]", "7"],
+  ];
+
+  const CAN_BIT_INDEX_DROPDOWN = [
+    ["bit[0]", "0"], ["bit[1]", "1"], ["bit[2]", "2"], ["bit[3]", "3"],
+    ["bit[4]", "4"], ["bit[5]", "5"], ["bit[6]", "6"], ["bit[7]", "7"],
+  ];
+
+  const CAN_CHANNEL_DROPDOWN = [
+    ["全体設定", "default"],
+    ["CAN1", "can1"],
+    ["CAN2", "can2"],
+    ["両方", "both"],
+  ];
+
+  Blockly.Blocks['can_read_value'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField("CAN受信 ID")
+        .appendField(new Blockly.FieldTextInput("0x410"), "CAN_ID")
+        .appendField("の")
+        .appendField(new Blockly.FieldDropdown(CAN_BYTE_OFFSET_DROPDOWN), "OFFSET")
+        .appendField("から")
+        .appendField(new Blockly.FieldDropdown(CAN_DTYPE_DROPDOWN), "DTYPE")
+        .appendField("× 倍率")
+        .appendField(new Blockly.FieldNumber(1, -100000, 100000, 0.01), "SCALE");
+      this.setOutput(true, "Number");
+      this.setColour(195);
+      this.setTooltip("指定した CAN ID の受信フレームから指定バイト位置の数値を取り出します (未受信時は 0.0)。");
+      this.setHelpUrl("");
+    }
+  };
+
+  Blockly.Blocks['can_read_bit'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField("CAN受信 ID")
+        .appendField(new Blockly.FieldTextInput("0x410"), "CAN_ID")
+        .appendField("の")
+        .appendField(new Blockly.FieldDropdown(CAN_BYTE_OFFSET_DROPDOWN), "OFFSET")
+        .appendField(new Blockly.FieldDropdown(CAN_BIT_INDEX_DROPDOWN), "BIT")
+        .appendField("が ON (1)");
+      this.setOutput(true, "Boolean");
+      this.setColour(195);
+      this.setTooltip("指定した CAN ID の受信フレームから特定ビットの状態 (True/False) を取得します。");
+      this.setHelpUrl("");
+    }
+  };
+
+  Blockly.Blocks['can_send_bytes'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField("CAN送信 ID")
+        .appendField(new Blockly.FieldTextInput("0x400"), "CAN_ID")
+        .appendField("ch")
+        .appendField(new Blockly.FieldDropdown(CAN_CHANNEL_DROPDOWN), "CHANNEL")
+        .appendField("DLC")
+        .appendField(new Blockly.FieldDropdown([
+          ["1B", "1"], ["2B", "2"], ["3B", "3"], ["4B", "4"],
+          ["5B", "5"], ["6B", "6"], ["7B", "7"], ["8B", "8"]
+        ]), "DLC");
+      this.getField("DLC").setValue("8");
+      for (let i = 0; i < 8; i++) {
+        this.appendValueInput(`B${i}`)
+          .setCheck("Number")
+          .setAlign(Blockly.ALIGN_RIGHT)
+          .appendField(`B${i}`);
+      }
+      this.setInputsInline(true);
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour(195);
+      this.setTooltip("指定した CAN ID へ B0〜B7 のバイト列 (0〜255) を送信します。");
+      this.setHelpUrl("");
+    }
+  };
+
+  Blockly.Blocks['can_send_value'] = {
+    init: function () {
+      this.appendValueInput("VAL")
+        .setCheck("Number")
+        .appendField("CAN数値送信 ID")
+        .appendField(new Blockly.FieldTextInput("0x400"), "CAN_ID")
+        .appendField("ch")
+        .appendField(new Blockly.FieldDropdown(CAN_CHANNEL_DROPDOWN), "CHANNEL")
+        .appendField(new Blockly.FieldDropdown(CAN_BYTE_OFFSET_DROPDOWN), "OFFSET")
+        .appendField(new Blockly.FieldDropdown(CAN_DTYPE_DROPDOWN), "DTYPE")
+        .appendField("値");
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour(195);
+      this.setTooltip("数値を指定のデータ型に変換して CAN ID の指定バイト位置へ詰めて送信します (8バイトフレーム)。");
+      this.setHelpUrl("");
+    }
+  };
+
   Blockly.Blocks['event_macro'] = {
     init: function () {
       this.appendDummyInput()
@@ -4093,6 +4427,55 @@ document.addEventListener("DOMContentLoaded", () => {
     if (name === 'none') return ['0.0', getAtomicOrder()];
     const field = block.getFieldValue('FIELD') || 'angle_deg';
     return [`self.get_module("${name}").get_feedback().${field}`, getAtomicOrder()];
+  });
+
+  function sanitizeCanIdLiteral(raw) {
+    const cleaned = String(raw || "0x400").trim().replace(/[^0-9a-fA-FxX]/g, "");
+    return JSON.stringify(cleaned || "0x400");
+  }
+
+  registerGenerator('can_read_value', function (block) {
+    const idLit = sanitizeCanIdLiteral(block.getFieldValue('CAN_ID'));
+    const offset = parseInt(block.getFieldValue('OFFSET') || '0', 10) || 0;
+    const dtype = JSON.stringify(block.getFieldValue('DTYPE') || 'uint8');
+    const scaleRaw = Number(block.getFieldValue('SCALE'));
+    const scale = Number.isFinite(scaleRaw) ? scaleRaw : 1.0;
+    return [`self.can.read_value(${idLit}, offset=${offset}, dtype=${dtype}, scale=${scale})`, getAtomicOrder()];
+  });
+
+  registerGenerator('can_read_bit', function (block) {
+    const idLit = sanitizeCanIdLiteral(block.getFieldValue('CAN_ID'));
+    const offset = parseInt(block.getFieldValue('OFFSET') || '0', 10) || 0;
+    const bitIdx = parseInt(block.getFieldValue('BIT') || '0', 10) || 0;
+    return [`self.can.read_bit(${idLit}, offset=${offset}, bit_idx=${bitIdx})`, getAtomicOrder()];
+  });
+
+  registerGenerator('can_send_bytes', function (block, generator) {
+    const root = block.getRootBlock();
+    if (!root || root.type !== 'event_macro') return '';
+    const gen = generator || pyGen;
+    const order = getAtomicOrder();
+    const idLit = sanitizeCanIdLiteral(block.getFieldValue('CAN_ID'));
+    const channel = JSON.stringify(block.getFieldValue('CHANNEL') || 'default');
+    const dlc = Math.max(1, Math.min(8, parseInt(block.getFieldValue('DLC') || '8', 10) || 8));
+    const vals = [];
+    for (let i = 0; i < dlc; i++) {
+      vals.push(gen.valueToCode(block, `B${i}`, order) || '0');
+    }
+    return `self.can.send_bytes(${idLit}, [${vals.join(', ')}], channel=${channel})\n`;
+  });
+
+  registerGenerator('can_send_value', function (block, generator) {
+    const root = block.getRootBlock();
+    if (!root || root.type !== 'event_macro') return '';
+    const gen = generator || pyGen;
+    const order = getAtomicOrder();
+    const idLit = sanitizeCanIdLiteral(block.getFieldValue('CAN_ID'));
+    const channel = JSON.stringify(block.getFieldValue('CHANNEL') || 'default');
+    const offset = parseInt(block.getFieldValue('OFFSET') || '0', 10) || 0;
+    const dtype = JSON.stringify(block.getFieldValue('DTYPE') || 'int16_le');
+    const val = gen.valueToCode(block, 'VAL', order) || '0';
+    return `self.can.send_value(${idLit}, ${val}, offset=${offset}, dtype=${dtype}, dlc=8, channel=${channel})\n`;
   });
 
   registerGenerator('gamepad_axis_scaled', function (block, generator) {
@@ -4490,6 +4873,23 @@ if __name__ == '__main__':
         </block>
         <block type="robomas_reset_zero"></block>
         <block type="robomas_feedback_val"></block>
+      </category>
+      <category name="汎用 CAN" colour="195">
+        <block type="can_read_value"></block>
+        <block type="can_read_bit"></block>
+        <block type="can_send_bytes">
+          <value name="B0"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B1"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B2"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B3"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B4"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B5"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B6"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+          <value name="B7"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+        </block>
+        <block type="can_send_value">
+          <value name="VAL"><shadow type="math_number"><field name="NUM">0</field></shadow></value>
+        </block>
       </category>
     </xml>
   `;

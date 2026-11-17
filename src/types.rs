@@ -253,6 +253,12 @@ pub enum WsEvent {
     },
     #[serde(rename = "raw_can_frame")]
     RawCanFrame { data: String },
+    #[serde(rename = "can_rx_frame")]
+    CanRxFrame {
+        id: u16,
+        data: Vec<u8>,
+        channel: String,
+    },
     #[serde(rename = "gamepad_input")]
     GamepadInput {
         buttons: Vec<bool>,

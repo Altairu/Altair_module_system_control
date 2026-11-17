@@ -24,9 +24,10 @@ class _SimpleWsClient:
     外部ライブラリ不要の標準ライブラリのみによる軽量WebSocketクライアント
     """
 
-    def __init__(self, url, on_message):
+    def __init__(self, url, on_message, on_connect=None):
         self.url = url
         self.on_message = on_message
+        self.on_connect = on_connect
         self.sock = None
         self.connected = False
         self._running = True
@@ -84,6 +85,11 @@ class _SimpleWsClient:
         while self._running:
             try:
                 self._connect()
+                if self.on_connect:
+                    try:
+                        self.on_connect()
+                    except Exception:
+                        pass
                 while self._running and self.connected:
                     b0, b1 = self._read_exact(2)
                     opcode = b0 & 0x0F
@@ -412,6 +418,239 @@ class RobomasClient:
         return self.latest_feedback
 
 
+class RawCanClient:
+    """
+    任意の CAN ID に対する汎用バイト列送受信クライアント (Windows / ROS2 共通API)
+    """
+
+    _DTYPE_SPECS = {
+        "uint8": ("<B", 1, 0, 255),
+        "int8": ("<b", 1, -128, 127),
+        "uint16_le": ("<H", 2, 0, 65535),
+        "int16_le": ("<h", 2, -32768, 32767),
+        "uint16_be": (">H", 2, 0, 65535),
+        "int16_be": (">h", 2, -32768, 32767),
+        "uint32_le": ("<I", 4, 0, 4294967295),
+        "int32_le": ("<i", 4, -2147483648, 2147483647),
+        "uint32_be": (">I", 4, 0, 4294967295),
+        "int32_be": (">i", 4, -2147483648, 2147483647),
+        "float32_le": ("<f", 4, None, None),
+        "float32_be": (">f", 4, None, None),
+    }
+
+    def __init__(self, behavior):
+        self.behavior = behavior
+        self._lock = threading.Lock()
+        self._rx_frames = {}
+        self._subscribed_ids = set()
+        self._warned_keys = set()
+        self._last_send_times = {}
+
+    def _warn_once(self, key, msg):
+        with self._lock:
+            if key in self._warned_keys:
+                return
+            self._warned_keys.add(key)
+        self.behavior.get_logger().warn(msg)
+
+    def _parse_can_id(self, can_id):
+        try:
+            if isinstance(can_id, bool):
+                raise ValueError("bool is not valid CAN ID")
+            if isinstance(can_id, (int, float)):
+                sid = int(can_id)
+            else:
+                s = str(can_id).strip()
+                sid = int(s, 0)
+            if 1 <= sid <= 0x7FF:
+                return sid
+        except Exception:
+            pass
+        self._warn_once(
+            f"bad_id_{can_id}",
+            f"無効な CAN ID '{can_id}' が指定されました (0x001〜0x7FF の標準IDを指定してください)。",
+        )
+        return None
+
+    def _normalize_channel(self, channel):
+        ch = str(channel or "default").strip().lower()
+        if ch in ("can1", "can2", "both"):
+            return ch
+        return "default"
+
+    def _update_rx_frame(self, can_id, data_bytes):
+        sid = int(can_id) & 0x7FF
+        if sid == 0:
+            return
+        with self._lock:
+            self._rx_frames[sid] = bytes(data_bytes)[:8]
+
+    def _resubscribe_all(self):
+        with self._lock:
+            ids = list(self._subscribed_ids)
+        for sid in ids:
+            self.behavior._ws.send_json({"type": "subscribe_can_id", "id": sid})
+
+    def _ensure_subscribed(self, sid):
+        need_sub = False
+        with self._lock:
+            if sid not in self._subscribed_ids:
+                self._subscribed_ids.add(sid)
+                need_sub = True
+        if need_sub:
+            self.behavior._ws.send_json({"type": "subscribe_can_id", "id": sid})
+            # 初回購読時はキャッシュまたは直近フレームの到着を最大20ms待機
+            for _ in range(4):
+                with self._lock:
+                    if sid in self._rx_frames:
+                        break
+                time.sleep(0.005)
+
+    def has_frame(self, can_id):
+        sid = self._parse_can_id(can_id)
+        if sid is None:
+            return False
+        self._ensure_subscribed(sid)
+        with self._lock:
+            return sid in self._rx_frames
+
+    def read_bytes(self, can_id):
+        sid = self._parse_can_id(can_id)
+        if sid is None:
+            return []
+        self._ensure_subscribed(sid)
+        with self._lock:
+            raw = self._rx_frames.get(sid)
+        return list(raw) if raw is not None else []
+
+    def read_byte(self, can_id, offset=0, default=0):
+        return int(self.read_value(can_id, offset=offset, dtype="uint8", scale=1.0, default=default))
+
+    def read_bit(self, can_id, offset=0, bit_idx=0):
+        try:
+            off = int(offset)
+            bit = int(bit_idx)
+        except Exception:
+            return False
+        if not (0 <= off < 8 and 0 <= bit < 8):
+            return False
+        sid = self._parse_can_id(can_id)
+        if sid is None:
+            return False
+        self._ensure_subscribed(sid)
+        with self._lock:
+            raw = self._rx_frames.get(sid)
+        if raw is None or len(raw) <= off:
+            return False
+        return bool((raw[off] >> bit) & 1)
+
+    def read_value(self, can_id, offset=0, dtype="uint8", scale=1.0, default=0.0):
+        sid = self._parse_can_id(can_id)
+        if sid is None:
+            return default
+        spec = self._DTYPE_SPECS.get(str(dtype).strip().lower())
+        if spec is None:
+            self._warn_once(f"bad_dtype_{dtype}", f"未知のデータ型 '{dtype}' が指定されました。")
+            return default
+        fmt, size, _, _ = spec
+        try:
+            off = int(offset)
+            sc = float(scale)
+        except Exception:
+            return default
+        if off < 0 or off + size > 8:
+            self._warn_once(
+                f"bad_range_{off}_{size}",
+                f"バイト位置の範囲外です (offset={off}, size={size} は 0〜7 バイトに収まる必要があります)。",
+            )
+            return default
+
+        self._ensure_subscribed(sid)
+        with self._lock:
+            raw = self._rx_frames.get(sid)
+        if raw is None or len(raw) < off + size:
+            return default
+        try:
+            val = struct.unpack_from(fmt, raw, off)[0] * sc
+            if not math.isfinite(val):
+                return default
+            return val
+        except Exception:
+            return default
+
+    def send_bytes(self, can_id, data, channel="default"):
+        sid = self._parse_can_id(can_id)
+        if sid is None:
+            return
+        if isinstance(data, (int, float)):
+            seq = [data]
+        else:
+            try:
+                seq = list(data)
+            except Exception:
+                seq = []
+        payload = []
+        for item in seq[:8]:
+            try:
+                v = int(round(float(item)))
+            except Exception:
+                v = 0
+            payload.append(max(0, min(255, v)))
+
+        now = time.monotonic()
+        with self._lock:
+            prev = self._last_send_times.get(sid, 0.0)
+            elapsed = now - prev
+            if elapsed < 0.0005:
+                time.sleep(0.0005 - elapsed)
+                now = time.monotonic()
+            self._last_send_times[sid] = now
+
+        self.behavior._ws.send_json(
+            {
+                "type": "raw_can_tx",
+                "id": sid,
+                "data": payload,
+                "channel": self._normalize_channel(channel),
+            }
+        )
+
+    def send_value(self, can_id, value, offset=0, dtype="int16_le", dlc=8, channel="default"):
+        sid = self._parse_can_id(can_id)
+        if sid is None:
+            return
+        spec = self._DTYPE_SPECS.get(str(dtype).strip().lower())
+        if spec is None:
+            self._warn_once(f"bad_dtype_{dtype}", f"未知のデータ型 '{dtype}' が指定されました。")
+            return
+        fmt, size, min_v, max_v = spec
+        try:
+            off = int(offset)
+            req_dlc = int(dlc)
+            fval = float(value)
+        except Exception:
+            return
+        if off < 0 or off + size > 8:
+            self._warn_once(
+                f"bad_range_{off}_{size}",
+                f"バイト位置の範囲外です (offset={off}, size={size} は 0〜7 バイトに収まる必要があります)。",
+            )
+            return
+        if not math.isfinite(fval):
+            fval = 0.0
+
+        eff_dlc = max(off + size, min(8, req_dlc))
+        buf = bytearray(eff_dlc)
+        if min_v is not None and max_v is not None:
+            ival = int(round(fval))
+            ival = max(min_v, min(max_v, ival))
+            struct.pack_into(fmt, buf, off, ival)
+        else:
+            struct.pack_into(fmt, buf, off, fval)
+
+        self.send_bytes(sid, list(buf), channel=channel)
+
+
 class AltairBehavior:
     """
     すべてのユーザー動作プログラム（Behavior）のベースクラス (ROS2不要スタンドアロン対応版)
@@ -425,9 +664,12 @@ class AltairBehavior:
 
         self.config = self._load_config()
         self.gamepad = GamepadState()
+        self.can = RawCanClient(self)
 
         ws_url = os.getenv("ALTAIR_WS_URL", "ws://127.0.0.1:8000/ws?filter=behavior")
-        self._ws = _SimpleWsClient(ws_url, self._on_ws_message)
+        self._ws = _SimpleWsClient(
+            ws_url, self._on_ws_message, on_connect=self.can._resubscribe_all
+        )
 
         # WebSocket接続完了を少し待つ (最大0.3秒)
         for _ in range(30):
@@ -494,6 +736,10 @@ class AltairBehavior:
                     fb.target = float(data.get("target", 0.0))
                     fb.control_mode = str(data.get("control_mode", "current"))
                     client.latest_feedback = fb
+            elif mtype == "can_rx_frame":
+                can_id = msg.get("id", 0)
+                data = msg.get("data", [])
+                self.can._update_rx_frame(can_id, bytes(int(x) & 0xFF for x in data))
         except Exception:
             pass
 
