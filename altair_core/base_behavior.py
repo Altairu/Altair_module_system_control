@@ -457,7 +457,11 @@ class RawCanClient:
         try:
             if isinstance(can_id, bool):
                 raise ValueError("bool is not valid CAN ID")
-            if isinstance(can_id, (int, float)):
+            if isinstance(can_id, int):
+                sid = int(can_id)
+            elif isinstance(can_id, float):
+                if not math.isfinite(can_id) or not can_id.is_integer():
+                    raise ValueError("non-integer float CAN ID")
                 sid = int(can_id)
             else:
                 s = str(can_id).strip()
@@ -582,36 +586,57 @@ class RawCanClient:
         sid = self._parse_can_id(can_id)
         if sid is None:
             return
+        if isinstance(data, bool) or isinstance(data, (str, dict)):
+            self._warn_once(
+                "bad_tx_data_type",
+                "send_bytes の data にはバイト配列 (list/tuple/bytes) を指定してください。",
+            )
+            return
         if isinstance(data, (int, float)):
             seq = [data]
+        elif isinstance(data, (list, tuple, bytes, bytearray)):
+            seq = list(data)
         else:
-            try:
-                seq = list(data)
-            except Exception:
-                seq = []
+            self._warn_once(
+                "bad_tx_data_type",
+                "send_bytes の data にはバイト配列 (list/tuple/bytes) を指定してください。",
+            )
+            return
         payload = []
         for item in seq[:8]:
             try:
-                v = int(round(float(item)))
+                if isinstance(item, bool):
+                    v = int(item)
+                else:
+                    f = float(item)
+                    if not math.isfinite(f):
+                        v = 0
+                    else:
+                        v = int(round(f))
             except Exception:
                 v = 0
             payload.append(max(0, min(255, v)))
 
+        ch = self._normalize_channel(channel)
+        rate_key = (sid, ch)
+        sleep_sec = 0.0
         now = time.monotonic()
         with self._lock:
-            prev = self._last_send_times.get(sid, 0.0)
-            elapsed = now - prev
-            if elapsed < 0.0005:
-                time.sleep(0.0005 - elapsed)
-                now = time.monotonic()
-            self._last_send_times[sid] = now
+            next_allowed = self._last_send_times.get(rate_key, 0.0) + 0.0005
+            if now < next_allowed:
+                sleep_sec = next_allowed - now
+                self._last_send_times[rate_key] = next_allowed
+            else:
+                self._last_send_times[rate_key] = now
+        if sleep_sec > 0.0:
+            time.sleep(sleep_sec)
 
         self.behavior._ws.send_json(
             {
                 "type": "raw_can_tx",
                 "id": sid,
                 "data": payload,
-                "channel": self._normalize_channel(channel),
+                "channel": ch,
             }
         )
 

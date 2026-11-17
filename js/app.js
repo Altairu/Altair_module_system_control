@@ -446,7 +446,20 @@ document.addEventListener("DOMContentLoaded", () => {
     if (savedWatch) {
       const parsed = JSON.parse(savedWatch);
       if (Array.isArray(parsed)) {
-        canWatchState.rules = parsed.filter(r => r && Number.isInteger(r.idNum));
+        canWatchState.rules = parsed
+          .filter(r => r && Number.isInteger(r.idNum) && r.idNum >= 1 && r.idNum <= 0x7FF)
+          .map(r => {
+            const off = parseInt(r.offset, 10);
+            const sc = Number(r.scale);
+            return {
+              name: String(r.name || `CAN_0x${r.idNum.toString(16).toUpperCase()}`),
+              idNum: r.idNum,
+              offset: (!isNaN(off) && off >= 0 && off <= 7) ? off : 0,
+              dtype: String(r.dtype || "uint8"),
+              scale: Number.isFinite(sc) ? sc : 1.0,
+              unit: String(r.unit || ""),
+            };
+          });
       }
     }
   } catch (_) {}
@@ -721,7 +734,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (modules.length > 0) {
       html += '<optgroup label="モジュール別">';
       modules.forEach(m => {
-        html += `<option value="MOD:${m.name}">${m.name} (${m.base_id})</option>`;
+        const safeName = escapeHtmlSimple(m.name);
+        const safeBase = escapeHtmlSimple(m.base_id);
+        html += `<option value="MOD:${safeName}">${safeName} (${safeBase})</option>`;
       });
       html += "</optgroup>";
     }
@@ -731,8 +746,9 @@ document.addEventListener("DOMContentLoaded", () => {
       html += '<optgroup label="CAN ID別">';
       sortedIds.forEach(idHex => {
         const info = resolveCanFrameInfo(parseInt(idHex, 16), []);
-        const suffix = info.label && info.label !== "未登録ID" ? ` - ${info.label}` : "";
-        html += `<option value="${idHex}">${idHex}${suffix}</option>`;
+        const suffix = info.label && info.label !== "未登録ID" ? ` - ${escapeHtmlSimple(info.label)}` : "";
+        const safeId = escapeHtmlSimple(idHex);
+        html += `<option value="${safeId}">${safeId}${suffix}</option>`;
       });
       html += "</optgroup>";
     }
@@ -749,13 +765,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const div = document.createElement("div");
     div.className = "can-log-row";
     const dirClass = entry.dir === "TX" ? "can-log-dir-tx" : "can-log-dir-rx";
-    const hexStr = entry.hexTokens.join(" ");
-    const decStr = entry.decoded ? ` | ${entry.decoded}` : "";
+    const hexStr = escapeHtmlSimple(entry.hexTokens.join(" "));
+    const decStr = entry.decoded ? ` | ${escapeHtmlSimple(entry.decoded)}` : "";
+    const safeLabel = escapeHtmlSimple(entry.label);
     div.innerHTML = `
-      <span class="can-log-time">[${entry.timeStr}]</span>
-      <span class="${dirClass}">${entry.dir}</span>
-      <span class="can-log-id">${entry.idHex}</span>
-      <span class="can-log-label" title="${entry.label}">${entry.label}</span>
+      <span class="can-log-time">[${escapeHtmlSimple(entry.timeStr)}]</span>
+      <span class="${dirClass}">${escapeHtmlSimple(entry.dir)}</span>
+      <span class="can-log-id">${escapeHtmlSimple(entry.idHex)}</span>
+      <span class="can-log-label" title="${safeLabel}">${safeLabel}</span>
       <span class="can-log-data">[${entry.dlc}] ${hexStr}${decStr}</span>
     `;
     return div;
@@ -817,15 +834,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }).join("");
 
       return `
-        <tr class="${isSelected}" data-can-id="${item.idHex}" title="クリックでこのCAN ID (${item.idHex}) を絞り込み">
+        <tr class="${isSelected}" data-can-id="${escapeHtmlSimple(item.idHex)}" title="クリックでこのCAN ID (${escapeHtmlSimple(item.idHex)}) を絞り込み">
           <td>${dirBadge}</td>
-          <td><span class="can-id-badge">${item.idHex}</span></td>
-          <td style="font-weight: 500;">${item.label}</td>
+          <td><span class="can-id-badge">${escapeHtmlSimple(item.idHex)}</span></td>
+          <td style="font-weight: 500;">${escapeHtmlSimple(item.label)}</td>
           <td style="text-align: center; font-family: 'Consolas', monospace;">${item.dlc}</td>
           <td><div class="can-hex-bytes">${bytesHtml}</div></td>
-          <td><span class="can-decoded-text">${item.decoded || "-"}</span></td>
+          <td><span class="can-decoded-text">${item.decoded ? escapeHtmlSimple(item.decoded) : "-"}</span></td>
           <td style="text-align: right; font-family: 'Consolas', monospace; font-size: 11px; color: var(--text-muted);">
-            <strong>${item.count}</strong>回<br>${item.timeStr}
+            <strong>${item.count}</strong>回<br>${escapeHtmlSimple(item.timeStr)}
           </td>
         </tr>`;
     }).join("");
@@ -4045,7 +4062,7 @@ document.addEventListener("DOMContentLoaded", () => {
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour(195);
-      this.setTooltip("指定した CAN ID へ B0〜B7 のバイト列 (0〜255) を送信します。");
+      this.setTooltip("指定した CAN ID へ B0〜B7 のバイト列 (0〜255) を送信します。(Ethernet-CAN 接続時はハードウェア仕様により8バイト固定・不足分0埋めで送信されます)");
       this.setHelpUrl("");
     }
   };

@@ -1418,27 +1418,24 @@ async fn handle_ws_client(socket: WebSocket, state: AppState, filter: String) {
                 match msg_type {
                     "raw_can_tx" => {
                         if let Some(can_id) = parse_standard_can_id(val.get("id")) {
-                            let bytes: Vec<u8> = val
-                                .get("data")
-                                .and_then(|v| v.as_array())
-                                .map(|arr| {
-                                    arr.iter()
-                                        .take(8)
-                                        .map(|x| x.as_u64().unwrap_or(0).min(255) as u8)
-                                        .collect()
-                                })
-                                .unwrap_or_default();
-                            let req_ch = val
-                                .get("channel")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("default")
-                                .trim()
-                                .to_ascii_lowercase();
-                            let eff_ch = match req_ch.as_str() {
-                                "can1" | "can2" | "both" => req_ch,
-                                _ => eth_bridge.get_config().2,
-                            };
-                            (send_can_fn)(can_id, &bytes, &eff_ch, false);
+                            if let Some(arr) = val.get("data").and_then(|v| v.as_array()) {
+                                let bytes: Vec<u8> = arr
+                                    .iter()
+                                    .take(8)
+                                    .map(|x| x.as_u64().unwrap_or(0).min(255) as u8)
+                                    .collect();
+                                let req_ch = val
+                                    .get("channel")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("default")
+                                    .trim()
+                                    .to_ascii_lowercase();
+                                let eff_ch = match req_ch.as_str() {
+                                    "can1" | "can2" | "both" => req_ch,
+                                    _ => eth_bridge.get_config().2,
+                                };
+                                (send_can_fn)(can_id, &bytes, &eff_ch, false);
+                            }
                         }
                     }
                     "subscribe_can_id" => {
